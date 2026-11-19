@@ -36,6 +36,14 @@ test.describe('페이지 접근 (직접 URL)', () => {
     expect(errors).toEqual([])
   })
 
+  test('지연 로드 청크를 못 불러오면 404가 아니라 새로고침을 안내한다', async ({ page }) => {
+    // 새 버전 배포 후 열려 있던 탭이 사라진 청크를 요청하는 상황을 흉내 낸다
+    await page.route('**/assets/content-*.js', (route) => route.abort())
+    await page.goto('/concepts/cors')
+    await expect(page.getByRole('heading', { name: '페이지를 불러오지 못했습니다' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '새로고침' })).toBeVisible()
+  })
+
   test('없는 주소와 없는 개념은 404 안내를 보여 준다', async ({ page }) => {
     await page.goto('/no-such-page')
     await expect(page.getByText('404')).toBeVisible()
