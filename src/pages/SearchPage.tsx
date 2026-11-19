@@ -2,16 +2,23 @@ import { SearchX } from 'lucide-react'
 import { Link, useSearchParams } from 'react-router'
 import { categoryIcons, ConceptCard } from '../components/concepts/ConceptCard'
 import { SearchForm } from '../components/ui/SearchForm'
-import { categories, listTags, searchConcepts } from '../lib/content'
+import { useConceptBodies } from '../features/search/useConceptBodies'
+import { categories, listTags, searchConcepts, snippet } from '../lib/content'
+import type { SearchResult } from '../types/concept'
 
 const suggestions = ['낙관적 락', '이벤트 루프', 'React 렌더링', 'transaction', 'CORS', 'index']
 
 export function SearchPage() {
   const [params] = useSearchParams()
   const q = (params.get('q') ?? '').trim()
-  const results = q ? searchConcepts(q) : []
+  // 본문은 검색어가 생길 때 불러오며, 그 전에는 메타데이터만으로 검색한다
+  const bodies = useConceptBodies(!!q)
+  const results = q ? searchConcepts(q, {}, { bodies: bodies?.normalized }) : []
   // 정확히 일치하는 결과가 없을 때: 일부 키워드만 일치하는 개념을 대안으로 제시
-  const partial = q && results.length === 0 ? searchConcepts(q, {}, { match: 'any' }) : []
+  const partial = q && results.length === 0 ? searchConcepts(q, {}, { match: 'any', bodies: bodies?.normalized }) : []
+  /** 본문에서만 찾은 결과는 어디에서 일치했는지 문맥을 보여 준다 */
+  const snippetOf = (r: SearchResult) =>
+    bodies && r.matchedFields.every((f) => f === 'body') ? snippet(bodies.raw[r.concept.id] ?? '', q) : undefined
 
   return (
     <div className="mx-auto max-w-5xl px-4 pt-10 sm:px-6">
@@ -22,7 +29,7 @@ export function SearchPage() {
       {!q ? (
         <div className="mt-10">
           <h1 className="text-2xl font-bold text-fg">무엇을 찾고 있나요?</h1>
-          <p className="mt-2 text-sm text-muted">개념 이름, 영어 용어, 어노테이션, 태그로 검색할 수 있습니다.</p>
+          <p className="mt-2 text-sm text-muted">개념 이름, 영어 용어, 어노테이션, 태그, 본문 내용으로 검색할 수 있습니다.</p>
           <SuggestionChips />
         </div>
       ) : (
@@ -37,7 +44,7 @@ export function SearchPage() {
           {results.length > 0 ? (
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               {results.map((r) => (
-                <ConceptCard key={r.concept.id} concept={r.concept} matchedFields={r.matchedFields} />
+                <ConceptCard key={r.concept.id} concept={r.concept} matchedFields={r.matchedFields} snippet={snippetOf(r)} />
               ))}
             </div>
           ) : (
@@ -59,7 +66,7 @@ export function SearchPage() {
                   </h2>
                   <div className="grid gap-4 sm:grid-cols-2">
                     {partial.slice(0, 4).map((r) => (
-                      <ConceptCard key={r.concept.id} concept={r.concept} matchedFields={r.matchedFields} />
+                      <ConceptCard key={r.concept.id} concept={r.concept} matchedFields={r.matchedFields} snippet={snippetOf(r)} />
                     ))}
                   </div>
                 </section>

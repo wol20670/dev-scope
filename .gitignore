@@ -27,3 +27,6 @@ dist-ssr
 test-results
 playwright-report
 .playwright-mcp
+
+# 빌드 시 생성 (npm run content:export)
+public/content/

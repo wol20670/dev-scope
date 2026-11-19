@@ -9,7 +9,8 @@
   - Database & Infra: 낙관적·비관적 락, 트랜잭션 격리 수준, 인덱스
   - Network & Web: HTTP 요청·Spring 계층, CORS, OAuth2
 - 인터랙티브 시뮬레이터 5종: 락, 트랜잭션 격리 수준, 이벤트 루프, React 렌더링, HTTP 요청
-- 로컬 검색: 한·영 혼합, 조사·불용어 처리, 필드 가중치
+- 로컬 검색: 한·영 혼합, 조사·불용어 처리, 필드 가중치, 본문 검색과 일치 문맥 표시
+- 콘텐츠 JSON 내보내기(`/content/concepts.json`), Node에서 바로 실행되는 콘텐츠 조회·검색 모듈
 - 콘텐츠 검증 테스트, 단위 테스트, E2E 테스트(데스크톱·모바일)
 
 의도적으로 하지 않은 것: 서버, 로그인, DB, AI 챗봇, MCP 서버, 코드 실행, CMS, 결제
@@ -35,15 +36,15 @@
 
 - 개념이 수백 개를 넘으면 빌드 시 역색인을 생성
 - 초성 검색(ㄴㄱㅈ → 낙관적), 오타 허용(편집 거리)
-- 본문 텍스트 검색: 빌드 시 MDX에서 평문을 추출해 인덱스에 포함
 - 검색어 자동 완성, 최근 검색어(localStorage)
 
 ### MCP 서버
 
-1. `src/types`, `src/content`(meta), `src/lib/content`를 별도 패키지로 분리 (npm workspaces)
-2. 빌드 시 MDX → Markdown 추출 스크립트로 본문 텍스트 제공
-3. `@modelcontextprotocol/sdk` 기반 stdio 서버: `search_concepts`, `get_concept`, `list_concepts`, `get_related_concepts`
-4. Claude Desktop / Claude Code / VS Code 연동 가이드
+완료한 준비: 콘텐츠 계층의 Node 직접 실행, 본문 평문 추출, 콘텐츠 JSON 공개
+
+1. `@modelcontextprotocol/sdk` 기반 stdio 서버: `search_concepts`, `get_concept`, `list_concepts`, `get_related_concepts`
+2. 필요하면 콘텐츠 계층을 별도 패키지로 분리 (npm workspaces)
+3. Claude Desktop / Claude Code / VS Code 연동 가이드
 
 구조 설계는 [ARCHITECTURE.md](ARCHITECTURE.md)의 "향후 MCP 확장 구조"를 참고합니다.
 

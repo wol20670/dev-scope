@@ -2,6 +2,7 @@ import { SearchX, SlidersHorizontal, X } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router'
 import { categoryIcons, ConceptCard } from '../components/concepts/ConceptCard'
+import { useConceptBodies } from '../features/search/useConceptBodies'
 import { categories, countByCategory, difficultyLabels, listTags, searchConcepts } from '../lib/content'
 import type { CategoryId, Difficulty, SearchFilters } from '../types/concept'
 
@@ -25,7 +26,8 @@ function readFilters(params: URLSearchParams): { q: string; filters: SearchFilte
 export function ExplorePage() {
   const [params, setParams] = useSearchParams()
   const { q, filters } = readFilters(params)
-  const results = searchConcepts(q, filters)
+  const bodies = useConceptBodies(!!q.trim())
+  const results = searchConcepts(q, filters, { bodies: bodies?.normalized })
   const tags = listTags()
   const counts = countByCategory()
   const [filtersOpen, setFiltersOpen] = useState(false)

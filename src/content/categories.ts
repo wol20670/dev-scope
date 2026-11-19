@@ -1,4 +1,4 @@
-import type { Category, Difficulty } from '../types/concept'
+import type { Category, Difficulty } from '../types/concept.ts'
 
 export const categories: Category[] = [
   { id: 'backend', label: 'Backend', description: 'Spring, 트랜잭션, 동시성처럼 서버 애플리케이션의 동작 원리' },

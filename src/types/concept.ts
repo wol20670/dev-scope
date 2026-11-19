@@ -67,7 +67,26 @@ export interface SearchResult {
   matchedFields: SearchField[]
 }
 
-export type SearchField = 'title' | 'aliases' | 'tags' | 'keywords' | 'description'
+export type SearchField = 'title' | 'aliases' | 'tags' | 'keywords' | 'description' | 'body'
+
+/** 본문(MDX)의 `##` 섹션 하나를 평문으로 바꾼 것 */
+export interface ConceptSection {
+  heading: string
+  text: string
+}
+
+/** 메타데이터 + 본문 평문. 빌드 시 `content/concepts.json`으로 내보내며, 본문 검색과 외부 도구(MCP)가 쓴다. */
+export interface ConceptDocument extends ConceptMeta {
+  /** 사이트 기준 상대 경로 */
+  path: string
+  sections: ConceptSection[]
+}
+
+export interface ContentExport {
+  schemaVersion: 1
+  generatedAt: string
+  concepts: ConceptDocument[]
+}
 
 export interface ConceptSummary {
   id: string

@@ -1,12 +1,13 @@
-import type { ConceptMeta, SearchField, SearchFilters, SearchResult } from '../../types/concept'
+import type { ConceptDocument, ConceptMeta, SearchField, SearchFilters, SearchResult } from '../../types/concept.ts'
 
-/** 필드별 가중치. 제목 > 별칭 > 태그 > 키워드 > 설명 */
+/** 필드별 가중치. 제목 > 별칭 > 태그 > 키워드 > 설명 > 본문 */
 const FIELD_WEIGHTS: Record<SearchField, number> = {
   title: 10,
   aliases: 8,
   tags: 6,
   keywords: 5,
   description: 2,
+  body: 1,
 }
 
 /** 검색 의도에는 영향이 없는 단어. "낙관적 락과 비관적 락의 차이" → "차이" 제거 */
@@ -29,9 +30,13 @@ export function tokenize(query: string): string[] {
   return meaningful.length > 0 ? meaningful : tokens
 }
 
+type MetaField = Exclude<SearchField, 'body'>
+/** 본문(body)은 선택. 본문 인덱스를 불러온 뒤에만 검색 대상에 들어간다. */
+type Fields = Record<MetaField, string[]> & { body?: string[] }
+
 export interface IndexedConcept {
   concept: ConceptMeta
-  fields: Record<SearchField, string[]>
+  fields: Record<MetaField, string[]>
 }
 
 export function indexConcepts(concepts: ConceptMeta[]): IndexedConcept[] {
@@ -47,12 +52,12 @@ export function indexConcepts(concepts: ConceptMeta[]): IndexedConcept[] {
   }))
 }
 
-function scoreToken(fields: Record<SearchField, string[]>, token: string) {
+function scoreToken(fields: Fields, token: string) {
   let best = 0
   const matched: SearchField[] = []
   for (const field of Object.keys(FIELD_WEIGHTS) as SearchField[]) {
     let fieldScore = 0
-    for (const value of fields[field]) {
+    for (const value of fields[field] ?? []) {
       if (!value.includes(token)) continue
       // 완전 일치·접두 일치에 가산점
       const bonus = value === token ? 1.5 : value.startsWith(token) ? 1.2 : 1
@@ -64,7 +69,7 @@ function scoreToken(fields: Record<SearchField, string[]>, token: string) {
   return { score: best, matched }
 }
 
-function scoreTokenWithParticles(fields: Record<SearchField, string[]>, token: string) {
+function scoreTokenWithParticles(fields: Fields, token: string) {
   const direct = scoreToken(fields, token)
   if (direct.score > 0) return direct
   const stem = token.replace(TRAILING_PARTICLE, '')
@@ -84,13 +89,15 @@ export function matchesFilters(concept: ConceptMeta, filters: SearchFilters = {}
 export interface SearchOptions {
   /** 'all' = 모든 토큰이 일치(기본), 'any' = 하나라도 일치 (빈 결과일 때 대안 제시용) */
   match?: 'all' | 'any'
+  /** 개념 id → 정규화된 본문 텍스트 (prepareBodies 결과). 없으면 메타데이터만 검색한다. */
+  bodies?: Record<string, string>
 }
 
 export function search(
   index: IndexedConcept[],
   query: string,
   filters: SearchFilters = {},
-  { match = 'all' }: SearchOptions = {},
+  { match = 'all', bodies }: SearchOptions = {},
 ): SearchResult[] {
   const tokens = tokenize(query)
   const candidates = index.filter((item) => matchesFilters(item.concept, filters))
@@ -101,7 +108,9 @@ export function search(
 
   const phrase = normalize(query)
   const results: SearchResult[] = []
-  for (const { concept, fields } of candidates) {
+  for (const { concept, fields: meta } of candidates) {
+    const body = bodies?.[concept.id]
+    const fields: Fields = body ? { ...meta, body: [body] } : meta
     let score = 0
     let matchedTokens = 0
     const matched = new Set<SearchField>()
@@ -119,4 +128,57 @@ export function search(
   }
   // 점수 내림차순. 같은 점수면 원래 순서 유지 (Array.prototype.sort는 안정 정렬)
   return results.sort((a, b) => b.score - a.score)
+}
+
+/* ---------- 본문 검색 보조 ---------- */
+
+/** 본문 섹션을 하나의 평문으로 (제목 줄 포함) */
+export function bodyText(doc: Pick<ConceptDocument, 'sections'>): string {
+  return doc.sections.map((s) => `${s.heading}\n${s.text}`).join('\n')
+}
+
+/** 검색에 쓸 수 있게 본문을 미리 정규화한다. 한 번만 계산해서 재사용한다. */
+export function prepareBodies(docs: Pick<ConceptDocument, 'id' | 'sections'>[]): Record<string, string> {
+  return Object.fromEntries(docs.map((d) => [d.id, normalize(bodyText(d))]))
+}
+
+/**
+ * 원문 본문에서 검색어가 처음 나오는 곳 주변을 잘라 보여 준다. 못 찾으면 undefined.
+ * (정규화 텍스트는 공백이 없어 위치를 되돌릴 수 없으므로 원문에서 단어 단위로 찾는다)
+ */
+export interface Snippet {
+  /** 일치 지점 앞의 문맥 (잘렸으면 '…'로 시작) */
+  before: string
+  /** 원문에서 일치한 부분 (대소문자 원문 그대로) */
+  match: string
+  /** 일치 지점 뒤의 문맥 (잘렸으면 '…'로 끝) */
+  after: string
+}
+
+export function snippet(raw: string, query: string, radius = 48): Snippet | undefined {
+  const lower = raw.toLowerCase()
+  const words = query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w && !STOPWORDS.has(w))
+  const flat = (s: string) => s.replace(/\s+/g, ' ')
+  for (const word of words) {
+    for (const candidate of [word, word.replace(TRAILING_PARTICLE, '')]) {
+      if (!candidate) continue
+      const at = lower.indexOf(candidate)
+      if (at === -1) continue
+      const matchEnd = at + candidate.length
+      // 단어 중간에서 자르지 않도록 문맥 경계를 공백에 맞춘다
+      let start = Math.max(0, at - radius)
+      if (start > 0) start = Math.min(at, raw.indexOf(' ', start) + 1 || at)
+      let end = Math.min(raw.length, matchEnd + radius)
+      if (end < raw.length) end = Math.max(matchEnd, raw.lastIndexOf(' ', end))
+      return {
+        before: `${start > 0 ? '…' : ''}${flat(raw.slice(start, at)).trimStart()}`,
+        match: raw.slice(at, matchEnd),
+        after: `${flat(raw.slice(matchEnd, end)).trimEnd()}${end < raw.length ? '…' : ''}`,
+      }
+    }
+  }
+  return undefined
 }

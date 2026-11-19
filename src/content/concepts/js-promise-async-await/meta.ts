@@ -1,4 +1,4 @@
-import type { ConceptMeta } from '../../../types/concept'
+import type { ConceptMeta } from '../../../types/concept.ts'
 
 export default {
   id: 'js-promise-async-await',

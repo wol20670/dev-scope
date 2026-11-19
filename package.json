@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "predev": "npm run content:export",
+    "build": "tsc -b && npm run content:export && vite build",
     "preview": "vite preview",
+    "content:export": "node scripts/export-content.ts",
     "typecheck": "tsc -b",
     "lint": "oxlint",
     "test": "vitest run",
@@ -41,5 +43,8 @@
     "typescript": "~7.0.2",
     "vite": "^8.3.6",
     "vitest": "^5.1.1"
+  },
+  "engines": {
+    "node": ">=22.18"
   }
 }

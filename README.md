@@ -13,7 +13,7 @@ DevScope는 개발자가 이해하기 어려운 기술 개념을 **쉬운 비유
   - **React 렌더링**: state 변경 버튼, 렌더 단계와 커밋 단계, memo, DOM 변경 diff
   - **HTTP 요청·응답**: Browser → … → Database 왕복. 계층을 클릭하면 역할과 Spring Boot 코드를 보여 줍니다
 - **13개 개념 페이지.** 한국어로 작성했고, 공식 문서 출처와 관련 개념, 이전·다음 개념 이동, 목차를 갖췄습니다.
-- **로컬 검색.** 한국어·영어 용어를 함께 검색하고 조사·불용어를 처리합니다. 제목·별칭·태그·키워드·설명을 대상으로 합니다.
+- **로컬 검색.** 한국어·영어 용어를 함께 검색하고 조사·불용어를 처리합니다. 제목·별칭·태그·키워드·설명에 더해 **본문 내용**까지 검색하며, 본문에서만 찾은 결과에는 일치한 문맥을 보여 줍니다.
 - **개념 탐색.** 카테고리·난이도·태그·시뮬레이터 유무로 필터링합니다. 필터는 URL에 저장되어 새로고침이나 링크 공유 후에도 유지됩니다.
 - 다크 테마, 반응형(데스크톱·모바일), 모션 감소 설정 대응, 키보드 접근성(본문 건너뛰기, `Ctrl/⌘ + K` 검색)
 
@@ -34,7 +34,7 @@ DevScope는 개발자가 이해하기 어려운 기술 개념을 **쉬운 비유
 
 ## 설치 및 실행
 
-Node.js 22.12 이상이 필요합니다 (Vitest 5 요구 사항, 개발 환경: Node 24).
+Node.js 22.18 이상이 필요합니다. 빌드 스크립트가 Node의 TypeScript 직접 실행 기능을 쓰기 때문입니다 (개발 환경: Node 24).
 
 ```bash
 npm install
@@ -47,6 +47,7 @@ npm run dev        # http://localhost:5173
 npm run build      # 타입 검사(tsc -b) + 프로덕션 빌드 → dist/
 npm run preview    # 빌드 결과 미리보기 (http://localhost:4173)
 
+npm run content:export  # 본문 추출 → public/content/concepts.json (build·dev가 자동 실행)
 npm run typecheck  # 타입 검사만
 npm run lint       # oxlint
 npm test           # 단위 테스트 (Vitest)
@@ -74,8 +75,12 @@ npm run test:e2e   # E2E 테스트: 빌드 → preview 서버 → 데스크톱·
 
 자세한 규격, 사용할 수 있는 MDX 컴포넌트(`<Callout>`, `<Flow>`, `<Sequence>`, `<Simulator />`), 정확성 원칙, 시뮬레이터 등록 방법은 [docs/CONTENT_GUIDE.md](docs/CONTENT_GUIDE.md)에 있습니다.
 
+## 콘텐츠 JSON (외부 도구용)
+
+빌드할 때 모든 개념의 메타데이터와 본문 평문을 하나의 JSON으로 내보냅니다. 배포 사이트의 [content/concepts.json](https://wol20670.github.io/dev-scope/content/concepts.json)에서 받을 수 있습니다. 콘텐츠 조회·검색 모듈(`src/lib/content`)은 번들러 없이 Node에서 바로 import할 수 있어, 이후 MCP 서버가 그대로 재사용할 수 있습니다. 자세한 형식은 [ARCHITECTURE.md](docs/ARCHITECTURE.md#5-mcp-확장-준비-현재-상태)에 있습니다.
+
 ## 문서
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): 시스템 구조, 콘텐츠·검색·시뮬레이터 계층, MCP 확장 구조
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): 시스템 구조, 콘텐츠·검색·시뮬레이터 계층, MCP 확장 준비 상태
 - [docs/CONTENT_GUIDE.md](docs/CONTENT_GUIDE.md): 콘텐츠 작성 가이드
 - [docs/ROADMAP.md](docs/ROADMAP.md): MVP 범위와 다음 단계

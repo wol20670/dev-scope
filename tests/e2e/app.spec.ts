@@ -71,6 +71,23 @@ test.describe('검색과 탐색', () => {
     await expect(page.getByTestId('concept-card').first()).toContainText('이벤트 루프')
   })
 
+  test('본문에만 있는 단어도 찾고, 일치한 문맥을 보여 준다', async ({ page }) => {
+    await page.goto('/search?q=%ED%99%94%EC%9D%B4%ED%8A%B8%EB%B3%B4%EB%93%9C') // 화이트보드
+    const card = page.getByTestId('concept-card')
+    await expect(card).toHaveCount(1)
+    await expect(card).toContainText('트랜잭션 격리 수준')
+    await expect(card.getByTestId('body-snippet')).toContainText('화이트보드')
+  })
+
+  test('콘텐츠 JSON(content/concepts.json)을 공개한다', async ({ request }) => {
+    const res = await request.get('/content/concepts.json')
+    expect(res.ok()).toBe(true)
+    const data = await res.json()
+    expect(data.schemaVersion).toBe(1)
+    expect(data.concepts).toHaveLength(concepts.length)
+    expect(data.concepts[0].sections.length).toBeGreaterThan(0)
+  })
+
   test('결과가 없으면 대안 키워드와 카테고리를 안내한다', async ({ page }) => {
     await page.goto('/search?q=kubernetes')
     await expect(page.getByTestId('empty-state')).toBeVisible()

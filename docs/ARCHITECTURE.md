@@ -42,8 +42,10 @@ src/
 ├─ lib/
 │  ├─ content/               # store.ts(조회 API), search.ts(검색), index.ts(기본 store)
 │  └─ simulation/            # player.ts(reducer), useStepPlayer.ts, accumulate.ts
+├─ features/search/          # useConceptBodies (본문 검색 데이터 지연 로드)
 ├─ types/concept.ts
 └─ styles/index.css          # Tailwind 테마 토큰 + MDX 본문 스타일
+scripts/                     # Node 전용: mdx-text.ts(본문 추출), export-content.ts(JSON 내보내기)
 tests/
 ├─ unit/                     # Vitest: 콘텐츠 검증, 검색, 재생, 시뮬레이션 모델
 └─ e2e/                      # Playwright: 페이지·검색·필터·시뮬레이터·반응형·접근성
@@ -89,8 +91,9 @@ tests/
 4. **점수**: 필드 가중치(제목 10 > 별칭 8 > 태그 6 > 키워드 5 > 설명 2)에 완전 일치(×1.5)·접두 일치(×1.2) 가산점을 곱합니다. 검색어 전체가 제목이나 별칭에 그대로 들어 있으면 +10입니다.
 5. **결합**: 기본은 모든 토큰이 일치해야 하는 AND입니다. 결과가 없으면 검색 페이지가 `match: 'any'`로 일부 키워드가 일치하는 개념을 대안으로 제시합니다.
 6. **필터**: 카테고리·난이도·태그(AND)·시뮬레이터 유무를 검색 전에 적용합니다.
+7. **본문**: 검색어가 생기면 `features/search/useConceptBodies`가 `content/concepts.json`(5.2 참고)을 한 번만 불러와 본문을 정규화해 둡니다. 이후 검색에는 `body` 필드가 가중치 1로 추가됩니다. 불러오기 전이나 실패했을 때는 메타데이터만으로 검색합니다. 본문에서만 일치한 결과에는 `snippet()`이 원문에서 찾은 문맥을 단어 경계에 맞춰 보여 주고, 일치한 단어를 강조합니다.
 
-개념이 수백 개 수준이면 매 입력마다 전체를 순회해도 충분히 빠릅니다. 수천 개 이상이 되거나 형태소 분석·오타 교정이 필요해지면 역색인이나 외부 검색 엔진을 검토합니다([ROADMAP](ROADMAP.md) 참고).
+개념이 수백 개 수준이면 매 입력마다 전체를 순회해도 충분히 빠릅니다. 본문 JSON은 현재 gzip 약 70KB이며, 개념이 늘면 빌드 시 역색인을 만들어 나눠 받는 방식으로 바꿉니다. 수천 개 이상이 되거나 형태소 분석·오타 교정이 필요해지면 역색인이나 외부 검색 엔진을 검토합니다([ROADMAP](ROADMAP.md) 참고).
 
 ## 4. 시뮬레이터 구조
 
@@ -122,27 +125,53 @@ UI 컴포넌트
 
 **지연 로드**: `registry/simulators.ts`에서 `React.lazy`로 등록하므로, 시뮬레이터 코드는 해당 개념 페이지에서만 로드됩니다.
 
-## 5. 향후 MCP 확장 구조
+## 5. MCP 확장 준비 (현재 상태)
 
-MCP 서버에서 재사용할 수 있도록 다음 경계를 지킵니다.
+### 5.1 Node에서 그대로 실행되는 콘텐츠 계층
 
-- `types/concept.ts`, `content/categories.ts`, `content/paths.ts`, `content/concepts/**/meta.ts`, `lib/content/*`는 **React·Vite·DOM을 import하지 않습니다.**
-- `createConceptStore(concepts)`는 데이터를 주입받는 순수 함수이며, 앱과 MCP가 같은 함수를 공유합니다.
+`types/concept.ts`, `content/categories.ts`, `content/paths.ts`, `content/concepts/**/meta.ts`, `lib/content/*`는 **React·Vite·DOM을 import하지 않고**, 상대 import에 `.ts` 확장자를 붙입니다. 그래서 Node 22.18 이상에서는 번들러나 빌드 없이 import할 수 있습니다 (Node 내장 타입 제거 기능 사용).
 
-예상 구성 (아직 구현하지 않음):
-
-```
-packages/
-├─ content/        # 지금의 src/types, src/content(meta), src/lib/content 를 옮긴 패키지
-├─ web/            # 현재 앱
-└─ mcp-server/     # @modelcontextprotocol/sdk 기반 stdio 서버
+```js
+// 저장소 루트에서
+const { searchConcepts, getConceptSummary } = await import('./src/lib/content/index.ts')
+searchConcepts('event loop')[0].concept.id // 'js-event-loop'
 ```
 
-| MCP tool (안) | 대응 함수 |
+이 호환성은 다음 두 가지가 지킵니다.
+
+- `tsconfig.node.json`(`module: nodenext`)이 `scripts/`가 import하는 콘텐츠 계층을 타입 검사합니다. 확장자가 빠지면 `tsc -b`가 실패합니다.
+- `tests/unit/content-export.test.ts`가 별도 Node 프로세스로 모듈을 import해 검색을 실행해 봅니다.
+
+`erasableSyntaxOnly`가 켜져 있으므로 이 계층에서 `enum`, `namespace`처럼 실행 시 코드가 필요한 TypeScript 문법은 쓸 수 없습니다.
+
+### 5.2 콘텐츠 JSON 내보내기
+
+`scripts/export-content.ts`가 메타데이터와 **본문 평문**을 `public/content/concepts.json`으로 내보냅니다. `npm run build`와 `npm run dev`(predev)가 자동으로 실행하며, 생성 파일은 git에 넣지 않습니다.
+
+- 본문 추출(`scripts/mdx-text.ts`)은 MDX를 실행하지 않고 문법 트리만 읽습니다. 문단·목록·표·코드 블록, 컴포넌트 자식 텍스트, `<Flow steps={[...]}>` 같은 속성 표현식 안의 문자열을 `##` 섹션 단위로 모읍니다.
+- 배포 사이트에서는 `https://wol20670.github.io/dev-scope/content/concepts.json`으로 공개됩니다.
+
+```ts
+interface ContentExport {
+  schemaVersion: 1
+  generatedAt: string // ISO 8601
+  concepts: (ConceptMeta & {
+    path: string // '/concepts/<slug>'
+    sections: { heading: string; text: string }[] // 본문 7개 섹션
+  })[]
+}
+```
+
+### 5.3 MCP 서버 구성 (다음 단계, 아직 구현하지 않음)
+
+| MCP tool (안) | 대응 |
 | --- | --- |
-| `search_concepts(query, filters)` | `searchConcepts` |
-| `get_concept(id)` | `getConceptSummary` (+ 본문 텍스트) |
+| `search_concepts(query, filters)` | `searchConcepts(query, filters, { bodies })` (본문 포함 검색) |
+| `get_concept(id, sections?)` | `getConceptSummary` + `concepts.json`의 `sections` |
 | `list_concepts(filters)` | `listConcepts` |
 | `get_related_concepts(id)` | `getRelatedConcepts` |
 
-본문(MDX)을 MCP에서 텍스트로 제공하려면 빌드 단계에서 MDX를 평문·Markdown으로 추출하는 스크립트가 필요합니다. 그 전까지는 `keyPoints`와 `description`, 출처가 요약 역할을 합니다.
+두 가지 방식이 가능합니다.
+
+1. **로컬 stdio 서버**: 이 저장소의 `src/lib/content`와 `scripts/mdx-text.ts`를 직접 import합니다. 콘텐츠를 편집하는 사람에게 적합합니다.
+2. **원격 데이터 사용**: 배포된 `content/concepts.json`을 받아 `createConceptStore()`와 `prepareBodies()`에 넣습니다. 저장소 없이도 동작합니다.

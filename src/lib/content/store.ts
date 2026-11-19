@@ -1,6 +1,6 @@
-import { categories } from '../../content/categories'
-import type { ConceptMeta, ConceptSummary, SearchFilters, SearchResult } from '../../types/concept'
-import { indexConcepts, matchesFilters, search, type SearchOptions } from './search'
+import { categories } from '../../content/categories.ts'
+import type { ConceptMeta, ConceptSummary, SearchFilters, SearchResult } from '../../types/concept.ts'
+import { indexConcepts, matchesFilters, search, type SearchOptions } from './search.ts'
 
 /**
  * 개념 데이터 조회·검색 API. React나 Vite에 의존하지 않으므로

@@ -1,6 +1,7 @@
 import { ArrowUpRight, Database, Globe, Monitor, MousePointerClick, Server, type LucideIcon } from 'lucide-react'
 import { Link } from 'react-router'
 import { categories, difficultyLabels } from '../../lib/content'
+import type { Snippet } from '../../lib/content/search'
 import type { CategoryId, ConceptMeta, Difficulty } from '../../types/concept'
 
 export const categoryIcons: Record<CategoryId, LucideIcon> = {
@@ -35,7 +36,7 @@ export function SimulatorBadge() {
   )
 }
 
-export function ConceptCard({ concept, matchedFields }: { concept: ConceptMeta; matchedFields?: string[] }) {
+export function ConceptCard({ concept, matchedFields, snippet }: { concept: ConceptMeta; matchedFields?: string[]; snippet?: Snippet }) {
   const Icon = categoryIcons[concept.category]
   return (
     <Link
@@ -62,6 +63,14 @@ export function ConceptCard({ concept, matchedFields }: { concept: ConceptMeta; 
           </span>
         ))}
       </div>
+      {snippet && (
+        <p className="mt-3 rounded-lg border border-line bg-canvas/50 px-2.5 py-2 text-xs leading-relaxed text-muted" data-testid="body-snippet">
+          <span className="mr-1 font-semibold text-subtle">본문</span>
+          {snippet.before}
+          <mark className="rounded bg-accent/20 px-0.5 text-sky-100">{snippet.match}</mark>
+          {snippet.after}
+        </p>
+      )}
       {matchedFields && matchedFields.length > 0 && (
         <p className="mt-3 border-t border-line pt-2 text-[11px] text-subtle">
           일치: {matchedFields.map((f) => fieldLabels[f] ?? f).join(', ')}
@@ -77,4 +86,5 @@ const fieldLabels: Record<string, string> = {
   tags: '태그',
   keywords: '키워드',
   description: '설명',
+  body: '본문',
 }
