@@ -46,6 +46,7 @@ src/
 ├─ types/concept.ts
 └─ styles/index.css          # Tailwind 테마 토큰 + MDX 본문 스타일
 scripts/                     # Node 전용: mdx-text.ts(본문 추출), export-content.ts(JSON 내보내기)
+mcp/server.ts                # MCP 서버 (stdio)
 tests/
 ├─ unit/                     # Vitest: 콘텐츠 검증, 검색, 재생, 시뮬레이션 모델
 └─ e2e/                      # Playwright: 페이지·검색·필터·시뮬레이터·반응형·접근성
@@ -125,7 +126,7 @@ UI 컴포넌트
 
 **지연 로드**: `registry/simulators.ts`에서 `React.lazy`로 등록하므로, 시뮬레이터 코드는 해당 개념 페이지에서만 로드됩니다.
 
-## 5. MCP 확장 준비 (현재 상태)
+## 5. MCP 서버와 콘텐츠 계층
 
 ### 5.1 Node에서 그대로 실행되는 콘텐츠 계층
 
@@ -162,16 +163,34 @@ interface ContentExport {
 }
 ```
 
-### 5.3 MCP 서버 구성 (다음 단계, 아직 구현하지 않음)
+### 5.3 MCP 서버 (`mcp/server.ts`)
 
-| MCP tool (안) | 대응 |
-| --- | --- |
-| `search_concepts(query, filters)` | `searchConcepts(query, filters, { bodies })` (본문 포함 검색) |
-| `get_concept(id, sections?)` | `getConceptSummary` + `concepts.json`의 `sections` |
-| `list_concepts(filters)` | `listConcepts` |
-| `get_related_concepts(id)` | `getRelatedConcepts` |
+`@modelcontextprotocol/server`(TypeScript SDK v2) 기반의 stdio 서버입니다. 연결 방법은 [README](../README.md#mcp-서버)를 참고합니다.
 
-두 가지 방식이 가능합니다.
+```
+node mcp/server.ts
+  └─ buildContentExport()        # scripts/export-content.ts: meta + MDX 본문 평문 (시작 시 1회)
+      └─ createConceptStore(docs) # src/lib/content: 웹 앱과 같은 조회·검색
+         prepareBodies(docs)      # 본문 검색 인덱스
+```
 
-1. **로컬 stdio 서버**: 이 저장소의 `src/lib/content`와 `scripts/mdx-text.ts`를 직접 import합니다. 콘텐츠를 편집하는 사람에게 적합합니다.
-2. **원격 데이터 사용**: 배포된 `content/concepts.json`을 받아 `createConceptStore()`와 `prepareBodies()`에 넣습니다. 저장소 없이도 동작합니다.
+| 도구 | 대응 함수 | 출력 |
+| --- | --- | --- |
+| `search_concepts(query, filters, limit)` | `searchConcepts(..., { bodies })`. 결과가 없으면 `match: 'any'`로 대체 | Markdown + `structuredContent.results` |
+| `get_concept(id, sections?)` | `ConceptDocument` + `getRelatedConcepts` | Markdown 문서 |
+| `list_concepts(filters)` | `listConcepts` | Markdown + `structuredContent.concepts` |
+| `get_related_concepts(id)` | `getPrerequisites`, `getRelatedConcepts` | Markdown + `structuredContent` |
+
+- 입력은 zod 스키마로 검증합니다. 잘못된 입력은 SDK가 `isError` 결과로 돌려줍니다.
+- 없는 id를 받으면 `isError`와 함께 비슷한 개념 id를 제안합니다. id 대신 slug도 받습니다.
+- 모든 도구에 `readOnlyHint: true`를 표시합니다.
+- 로그는 stderr로만 씁니다. stdout은 JSON-RPC 채널입니다.
+- 테스트(`tests/unit/mcp.test.ts`)는 SDK 클라이언트로 두 가지를 검증합니다.
+  - in-memory 연결: 각 도구의 동작
+  - 실제 `node mcp/server.ts` 프로세스와의 stdio 연결
+
+아직 하지 않은 것:
+
+- 배포된 `content/concepts.json`을 읽는 원격 모드: 지금은 저장소의 MDX를 직접 읽습니다.
+- HTTP transport(원격 MCP 서버)
+- MCP resources·prompts

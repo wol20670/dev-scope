@@ -30,7 +30,7 @@ src/content/
 
 본문 MDX는 `import.meta.glob`으로 slug 폴더에서 자동으로 찾으므로 라우트나 페이지를 수정할 필요가 없다.
 
-본문은 검색 대상이기도 하다. `npm run build`와 `npm run dev` 시작 시 `public/content/concepts.json`으로 추출된다. 개발 서버를 켠 채 본문을 고쳤다면 `npm run content:export`를 다시 실행해야 본문 검색에 반영된다 (화면의 본문은 즉시 반영된다).
+본문은 검색 대상이기도 하다. `npm run build`와 `npm run dev` 시작 시 `public/content/concepts.json`으로 추출된다. MCP 서버(`mcp/server.ts`)도 시작할 때 콘텐츠를 읽으므로, 실행 중이라면 다시 시작해야 반영된다. 개발 서버를 켠 채 본문을 고쳤다면 `npm run content:export`를 다시 실행해야 본문 검색에 반영된다 (화면의 본문은 즉시 반영된다).
 
 **Node 호환 규칙**: `meta.ts`와 `src/content`, `src/lib/content`의 상대 import에는 `.ts` 확장자를 붙인다 (예: `from '../../../types/concept.ts'`). 빠뜨리면 `npm run typecheck`(Node 설정 타입 검사) 또는 `npm test`(Node 호환 테스트)가 실패한다.
 

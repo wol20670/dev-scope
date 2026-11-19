@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "devscope": {
+      "command": "node",
+      "args": ["mcp/server.ts"]
+    }
+  }
+}

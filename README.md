@@ -15,6 +15,7 @@ DevScope는 개발자가 이해하기 어려운 기술 개념을 **쉬운 비유
 - **13개 개념 페이지.** 한국어로 작성했고, 공식 문서 출처와 관련 개념, 이전·다음 개념 이동, 목차를 갖췄습니다.
 - **로컬 검색.** 한국어·영어 용어를 함께 검색하고 조사·불용어를 처리합니다. 제목·별칭·태그·키워드·설명에 더해 **본문 내용**까지 검색하며, 본문에서만 찾은 결과에는 일치한 문맥을 보여 줍니다.
 - **개념 탐색.** 카테고리·난이도·태그·시뮬레이터 유무로 필터링합니다. 필터는 URL에 저장되어 새로고침이나 링크 공유 후에도 유지됩니다.
+- **MCP 서버.** Claude, VS Code 같은 AI 개발 도구가 DevScope 개념을 검색하고 읽을 수 있습니다 ([아래](#mcp-서버) 참고).
 - 다크 테마, 반응형(데스크톱·모바일), 모션 감소 설정 대응, 키보드 접근성(본문 건너뛰기, `Ctrl/⌘ + K` 검색)
 
 ## 기술 스택
@@ -28,9 +29,10 @@ DevScope는 개발자가 이해하기 어려운 기술 개념을 **쉬운 비유
 | 콘텐츠 | MDX 3 (`@mdx-js/rollup`, 빌드 시 컴파일), remark-gfm |
 | 코드 하이라이트 | Shiki 4. MDX는 빌드 시 `@shikijs/rehype`, 시뮬레이터 코드는 런타임 지연 로드 |
 | 아이콘 | Lucide |
+| MCP | MCP TypeScript SDK v2 (`@modelcontextprotocol/server`), zod 4 |
 | 테스트 | Vitest 5 (+ Testing Library), Playwright |
 
-백엔드·DB·인증은 없습니다. 검색과 시뮬레이션은 모두 브라우저에서 실행됩니다.
+웹 백엔드·DB·인증은 없습니다. 검색과 시뮬레이션은 모두 브라우저에서 실행되고, MCP 서버는 각자의 PC에서 로컬로 실행됩니다.
 
 ## 설치 및 실행
 
@@ -75,12 +77,60 @@ npm run test:e2e   # E2E 테스트: 빌드 → preview 서버 → 데스크톱·
 
 자세한 규격, 사용할 수 있는 MDX 컴포넌트(`<Callout>`, `<Flow>`, `<Sequence>`, `<Simulator />`), 정확성 원칙, 시뮬레이터 등록 방법은 [docs/CONTENT_GUIDE.md](docs/CONTENT_GUIDE.md)에 있습니다.
 
+## MCP 서버
+
+Claude, VS Code 같은 AI 개발 도구가 DevScope 개념을 검색하고 읽을 수 있는 MCP 서버(stdio)입니다. 웹 앱과 같은 조회·검색 모듈을 그대로 쓰고, 본문까지 검색합니다. 별도 빌드 없이 Node 22.18 이상에서 바로 실행됩니다.
+
+| 도구 | 설명 |
+| --- | --- |
+| `search_concepts` | 한·영 키워드로 개념 검색 (본문 포함). 카테고리·난이도·태그·시뮬레이터 필터와 `limit` 지원 |
+| `get_concept` | 개념 하나를 Markdown으로 반환. 핵심 요약, 본문 섹션, 선행·관련 개념, 출처 포함. `sections`로 필요한 섹션만 선택 가능 |
+| `list_concepts` | 필터를 적용한 개념 목록 |
+| `get_related_concepts` | 선행 개념과 관련 개념 |
+
+모든 도구는 읽기 전용입니다. 결과에는 사람이 읽을 Markdown과 프로그램용 `structuredContent`가 함께 담깁니다.
+
+### 연결하기
+
+먼저 `npm install`을 실행해 두어야 합니다.
+
+**Claude Code**: 저장소에 [.mcp.json](.mcp.json)이 들어 있습니다. 이 폴더에서 `claude`를 실행하면 `devscope` 서버 사용 여부를 묻고, 승인하면 연결됩니다. 다른 폴더에서 쓰려면 다음처럼 등록합니다.
+
+```bash
+claude mcp add devscope -- node /절대/경로/devscope/mcp/server.ts
+```
+
+**Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "devscope": { "command": "node", "args": ["/절대/경로/devscope/mcp/server.ts"] }
+  }
+}
+```
+
+**VS Code** (`.vscode/mcp.json`):
+
+```json
+{
+  "servers": {
+    "devscope": { "type": "stdio", "command": "node", "args": ["${workspaceFolder}/mcp/server.ts"] }
+  }
+}
+```
+
+- 결과에 들어가는 웹 페이지 주소는 기본이 배포 사이트입니다. 로컬 주소로 바꾸려면 환경 변수 `DEVSCOPE_SITE_URL`을 지정합니다 (예: `http://localhost:5173`).
+- 서버는 시작할 때 콘텐츠를 한 번 읽습니다. 개념을 추가하거나 수정했다면 서버를 다시 시작하세요.
+- 디버깅: `npm run mcp:inspect`는 MCP Inspector를 열어 도구를 직접 호출해 볼 수 있게 합니다. 처음 실행할 때 Inspector 패키지를 내려받습니다.
+- 서버를 `npm run`으로 감싸 실행하지 마세요. npm이 stdout에 출력하는 줄이 MCP 통신(JSON-RPC)을 깨뜨립니다.
+
 ## 콘텐츠 JSON (외부 도구용)
 
-빌드할 때 모든 개념의 메타데이터와 본문 평문을 하나의 JSON으로 내보냅니다. 배포 사이트의 [content/concepts.json](https://wol20670.github.io/dev-scope/content/concepts.json)에서 받을 수 있습니다. 콘텐츠 조회·검색 모듈(`src/lib/content`)은 번들러 없이 Node에서 바로 import할 수 있어, 이후 MCP 서버가 그대로 재사용할 수 있습니다. 자세한 형식은 [ARCHITECTURE.md](docs/ARCHITECTURE.md#5-mcp-확장-준비-현재-상태)에 있습니다.
+빌드할 때 모든 개념의 메타데이터와 본문 평문을 하나의 JSON으로 내보냅니다. 배포 사이트의 [content/concepts.json](https://wol20670.github.io/dev-scope/content/concepts.json)에서 받을 수 있습니다. 콘텐츠 조회·검색 모듈(`src/lib/content`)은 번들러 없이 Node에서 바로 import할 수 있으며, MCP 서버도 이 모듈을 그대로 씁니다. 자세한 형식은 [ARCHITECTURE.md](docs/ARCHITECTURE.md#5-mcp-서버와-콘텐츠-계층)에 있습니다.
 
 ## 문서
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): 시스템 구조, 콘텐츠·검색·시뮬레이터 계층, MCP 확장 준비 상태
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): 시스템 구조, 콘텐츠·검색·시뮬레이터 계층, MCP 서버 구조
 - [docs/CONTENT_GUIDE.md](docs/CONTENT_GUIDE.md): 콘텐츠 작성 가이드
 - [docs/ROADMAP.md](docs/ROADMAP.md): MVP 범위와 다음 단계

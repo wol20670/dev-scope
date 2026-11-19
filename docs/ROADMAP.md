@@ -11,9 +11,10 @@
 - 인터랙티브 시뮬레이터 5종: 락, 트랜잭션 격리 수준, 이벤트 루프, React 렌더링, HTTP 요청
 - 로컬 검색: 한·영 혼합, 조사·불용어 처리, 필드 가중치, 본문 검색과 일치 문맥 표시
 - 콘텐츠 JSON 내보내기(`/content/concepts.json`), Node에서 바로 실행되는 콘텐츠 조회·검색 모듈
+- MCP 서버(stdio): 개념 검색·읽기·목록·관련 개념 도구
 - 콘텐츠 검증 테스트, 단위 테스트, E2E 테스트(데스크톱·모바일)
 
-의도적으로 하지 않은 것: 서버, 로그인, DB, AI 챗봇, MCP 서버, 코드 실행, CMS, 결제
+의도적으로 하지 않은 것: 웹 백엔드, 로그인, DB, AI 챗봇, 코드 실행, CMS, 결제
 
 ## 다음 단계 후보
 
@@ -40,13 +41,14 @@
 
 ### MCP 서버
 
-완료한 준비: 콘텐츠 계층의 Node 직접 실행, 본문 평문 추출, 콘텐츠 JSON 공개
+완료: stdio MCP 서버(`mcp/server.ts`). 도구는 `search_concepts`, `get_concept`, `list_concepts`, `get_related_concepts`이고, Claude Code·Claude Desktop·VS Code 연결 방법은 README에 있습니다.
 
-1. `@modelcontextprotocol/sdk` 기반 stdio 서버: `search_concepts`, `get_concept`, `list_concepts`, `get_related_concepts`
-2. 필요하면 콘텐츠 계층을 별도 패키지로 분리 (npm workspaces)
-3. Claude Desktop / Claude Code / VS Code 연동 가이드
+다음 후보:
 
-구조 설계는 [ARCHITECTURE.md](ARCHITECTURE.md)의 "향후 MCP 확장 구조"를 참고합니다.
+1. 원격 모드: 배포된 `content/concepts.json`을 읽어 저장소 없이 실행
+2. HTTP transport로 원격 MCP 서버 운영 (필요해지면)
+3. 개념을 MCP resource(`devscope://concepts/{id}`)로도 노출
+4. npm 패키지로 배포해 `npx`로 실행 (콘텐츠 계층 패키지 분리 포함)
 
 ### 선택적인 Spring Boot 도입
 

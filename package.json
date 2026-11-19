@@ -13,9 +13,11 @@
     "lint": "oxlint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "mcp:inspect": "npx @modelcontextprotocol/inspector node mcp/server.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/server": "^2.4.0",
     "@shikijs/langs": "^4.6.0",
     "@shikijs/themes": "^4.6.0",
     "lucide-react": "^1.75.0",
@@ -23,10 +25,12 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router": "^8.5.2",
-    "shiki": "^4.6.0"
+    "shiki": "^4.6.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@mdx-js/rollup": "^3.1.1",
+    "@modelcontextprotocol/client": "^2.4.0",
     "@playwright/test": "^1.65.1",
     "@shikijs/rehype": "^4.6.0",
     "@tailwindcss/vite": "^4.3.5",
