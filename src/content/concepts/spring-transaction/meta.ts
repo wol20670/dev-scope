@@ -1,0 +1,78 @@
+import type { ConceptMeta } from '../../../types/concept'
+
+export default {
+  id: 'spring-transaction',
+  slug: 'spring-transaction',
+  title: 'Spring 트랜잭션',
+  description:
+    '@Transactional을 붙이면 Spring이 프록시로 메서드 호출을 감싸 트랜잭션을 시작하고 커밋·롤백한다. 전파 속성, 롤백 규칙, 자기 호출 문제를 알아야 의도대로 동작한다.',
+  category: 'backend',
+  tags: ['Spring', '트랜잭션', 'AOP'],
+  aliases: [
+    '@Transactional',
+    'Spring Transaction',
+    'Spring Transaction Management',
+    '선언적 트랜잭션',
+    'Declarative Transaction',
+    '트랜잭션 전파',
+  ],
+  keywords: [
+    'PlatformTransactionManager',
+    'TransactionInterceptor',
+    '프록시',
+    'Proxy',
+    'propagation',
+    '전파',
+    'REQUIRED',
+    'REQUIRES_NEW',
+    'NESTED',
+    'rollbackFor',
+    '롤백 규칙',
+    'checked exception',
+    'unchecked exception',
+    'self-invocation',
+    '자기 호출',
+    'readOnly',
+    'UnexpectedRollbackException',
+    'rollback-only',
+  ],
+  difficulty: 'intermediate',
+  prerequisites: ['spring-ioc-di'],
+  relatedConcepts: ['optimistic-pessimistic-lock', 'jpa-n-plus-one', 'http-request-lifecycle'],
+  visualizationType: 'static',
+  keyPoints: [
+    '@Transactional은 프록시가 메서드 호출을 가로채 트랜잭션을 시작하고, 정상 반환 시 커밋, 예외 시 롤백 규칙에 따라 롤백하는 방식으로 동작한다.',
+    '기본 설정에서 RuntimeException과 Error는 롤백되고, 체크 예외는 롤백되지 않고 커밋된다. rollbackFor로 바꿀 수 있다.',
+    '같은 클래스 안에서 this로 다른 메서드를 호출하면 프록시를 거치지 않으므로 그 메서드의 @Transactional은 적용되지 않는다.',
+    '기본 전파 속성 REQUIRED는 기존 트랜잭션에 참여하므로, 안쪽 메서드의 롤백 표시가 바깥 트랜잭션 전체에 영향을 준다.',
+    'readOnly = true는 최적화 힌트이며, 쓰기를 막아 준다는 보장은 DB와 드라이버에 따라 다르다.',
+  ],
+  references: [
+    {
+      title: 'Using @Transactional',
+      url: 'https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/annotations.html',
+      publisher: 'Spring Framework Reference',
+    },
+    {
+      title: 'Transaction Propagation',
+      url: 'https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/tx-propagation.html',
+      publisher: 'Spring Framework Reference',
+    },
+    {
+      title: 'Rolling Back a Declarative Transaction',
+      url: 'https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/rolling-back.html',
+      publisher: 'Spring Framework Reference',
+    },
+    {
+      title: 'Proxying Mechanisms',
+      url: 'https://docs.spring.io/spring-framework/reference/core/aop/proxying.html',
+      publisher: 'Spring Framework Reference',
+    },
+    {
+      title: 'Transactionality',
+      url: 'https://docs.spring.io/spring-data/jpa/reference/jpa/transactions.html',
+      publisher: 'Spring Data JPA Reference',
+    },
+  ],
+  updatedAt: '2026-11-19',
+} satisfies ConceptMeta

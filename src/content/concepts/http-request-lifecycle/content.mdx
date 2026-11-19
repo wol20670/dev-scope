@@ -1,0 +1,269 @@
+## 왜 필요한가?
+
+쇼핑몰 화면에서 상품을 클릭하면, 잠시 뒤 상품 이름과 가격이 나타난다. 그 짧은 순간에 브라우저와 서버, 그리고 서버 안의 여러 코드 사이에서 많은 일이 일어난다.
+
+이 흐름을 모르면 이런 순간에 막힌다.
+
+- 응답이 `404`, `500`, `415` 같은 상태 코드로 돌아왔는데 **어느 단계에서** 문제가 생겼는지 모른다.
+- 새 기능을 만들 때 검증 로직, 비즈니스 규칙, 쿼리를 **어느 클래스에** 둬야 할지 헷갈린다.
+- 엔티티를 그대로 반환했더니 JSON이 이상하게 나오거나 쿼리가 수십 번 실행되는데, 이유를 설명하지 못한다.
+
+이 개념에서는 가장 흔한 Spring Boot 웹 애플리케이션 구조를 예로 들어, `GET /api/products/1` 요청 하나가 들어와서 JSON 응답으로 나가기까지의 과정을 계층별로 따라간다.
+
+<Callout type="warn" title="이것은 대표적인 예시 구조다">
+여기서 다루는 **Controller → Service → Repository** 구조는 Spring 애플리케이션에서 널리 쓰이는 **계층형(layered) 아키텍처의 전형적인 예**다. 모든 시스템이 이렇게 생기지는 않는다. 헥사고날(포트와 어댑터)이나 클린 아키텍처처럼 의존 방향을 다르게 설계하기도 하고, 실제 요청 경로에는 로드 밸런서, API 게이트웨이, 서블릿 필터, 인터셉터, 캐시 등이 끼어 있는 경우가 많다. 리액티브 스택(Spring WebFlux)은 요청 처리 방식 자체가 다르다.
+</Callout>
+
+## 쉽게 이해하는 비유
+
+**식당에서 음식을 주문하는 과정**과 비슷하다.
+
+| 식당 | 웹 애플리케이션 |
+| --- | --- |
+| 손님이 주문서를 낸다 | 브라우저가 HTTP 요청을 보낸다 |
+| 입구 직원이 손님을 맞고 자리를 안내한다 | Tomcat이 연결을 받고 요청을 해석한다 |
+| 홀 매니저가 주문을 담당 웨이터에게 넘긴다 | DispatcherServlet이 알맞은 컨트롤러를 찾는다 |
+| 웨이터가 주문을 확인하고 주방에 전달한다 | Controller가 요청 값을 꺼내 Service를 호출한다 |
+| 주방장이 레시피대로 요리한다 | Service가 비즈니스 규칙을 실행한다 |
+| 창고 담당이 재료를 꺼내 온다 | Repository가 데이터베이스에서 데이터를 가져온다 |
+| 웨이터가 접시에 담아 손님에게 낸다 | 응답 객체가 JSON으로 바뀌어 브라우저로 간다 |
+
+비유가 틀리는 지점이 중요하다. 식당에서는 웨이터, 주방장, 창고 담당이 **각각 다른 사람**이지만, 일반적인 Spring 애플리케이션에서 Controller, Service, Repository는 **같은 프로세스 안의 객체**다. 요청을 처리하는 스레드 하나가 메서드 호출을 따라 아래로 내려갔다가, 반환값을 들고 다시 위로 올라오는 것이다. 네트워크를 건너는 것은 브라우저와 서버 사이, 그리고 애플리케이션과 데이터베이스 사이뿐이다.
+
+## 동작 원리
+
+### 1. 브라우저가 HTTP 요청을 보낸다
+
+HTTP 요청은 정해진 형식의 텍스트 메시지다(HTTP/2, HTTP/3에서는 전송 형식이 이진이지만 의미는 같다).
+
+```http
+GET /api/products/1 HTTP/1.1
+Host: shop.example.com
+Accept: application/json
+```
+
+- **메서드** `GET`: 자원을 조회한다. RFC 9110은 `GET`을 **안전한(safe)** 메서드로 정의한다. 서버의 상태를 바꾸려는 요청이 아니라는 뜻이고, 같은 요청을 여러 번 보내도 의도한 효과가 같은 **멱등(idempotent)** 메서드이기도 하다.
+- **대상** `/api/products/1`: 어떤 자원을 원하는지 나타낸다.
+- **헤더** `Accept`: 응답으로 JSON을 원한다는 뜻이다.
+
+실제로는 이 메시지를 보내기 전에 도메인 이름을 IP 주소로 바꾸고(DNS), TCP 연결과 HTTPS라면 TLS 핸드셰이크를 거친다.
+
+### 2. 서블릿 컨테이너(Tomcat)가 요청을 받는다
+
+Spring Boot로 만든 Spring MVC 애플리케이션은 기본으로 **내장 Tomcat**을 서블릿 컨테이너로 사용한다(Jetty로 바꿀 수도 있다).
+
+- 네트워크 연결에서 바이트를 읽어 HTTP 메시지를 해석하고, `HttpServletRequest`와 `HttpServletResponse` 객체를 만든다.
+- 전통적인 서블릿 모델에서는 **요청 하나를 스레드 하나가** 처음부터 끝까지 처리한다. Tomcat은 스레드 풀에서 스레드를 꺼내 이 요청을 맡긴다. (Spring Boot 3.2 이상에서는 가상 스레드를 쓰도록 설정할 수도 있다.)
+- 요청은 먼저 **서블릿 필터 체인**을 통과한다. 인코딩 처리, 로깅, CORS, Spring Security의 인증·인가 같은 공통 처리가 여기서 일어난다.
+- 필터를 모두 통과하면 `/`에 매핑된 서블릿, 즉 **DispatcherServlet**에 도착한다.
+
+### 3. DispatcherServlet이 처리할 메서드를 찾는다
+
+Spring MVC는 **프런트 컨트롤러 패턴**으로 설계되어 있다. 모든 요청이 DispatcherServlet 하나로 들어오고, 실제 일은 위임받은 구성 요소들이 한다.
+
+1. **HandlerMapping**: 요청의 메서드와 경로(`GET /api/products/1`)에 맞는 핸들러, 즉 `@GetMapping("/api/products/{id}")`이 붙은 컨트롤러 메서드를 찾는다.
+2. **HandlerInterceptor**: 등록된 인터셉터가 있다면 핸들러 실행 전후에 끼어든다.
+3. **HandlerAdapter**: 핸들러를 실제로 호출한다. 이때 경로의 `1`을 `Long id` 파라미터로 변환하는 등 **메서드 인자를 준비**한다.
+4. 처리 중 예외가 나면 **HandlerExceptionResolver**가 예외를 HTTP 응답(예: 404, 400)으로 바꾼다. `@ExceptionHandler`, `@RestControllerAdvice`가 이 단계에서 쓰인다.
+
+### 4. Controller: HTTP와 애플리케이션 사이의 번역가
+
+`@RestController`는 `@Controller`와 `@ResponseBody`를 합친 애너테이션이다.
+
+- HTTP 세계의 값(경로 변수, 쿼리 파라미터, 요청 본문)을 꺼내 **검증**하고, 애플리케이션이 이해하는 형태로 바꿔 Service를 호출한다.
+- Service의 결과를 응답용 객체(DTO)로 반환하고, 필요하면 상태 코드를 정한다.
+- 비즈니스 규칙은 두지 않는다. 컨트롤러는 "HTTP로 들어온 요청을 어떤 유스케이스로 연결할지"만 안다.
+
+### 5. Service: 비즈니스 로직과 트랜잭션
+
+- "재고가 없으면 주문할 수 없다", "회원 등급에 따라 할인한다" 같은 **업무 규칙**을 실행한다.
+- 보통 이 계층의 메서드에 `@Transactional`을 붙여 **트랜잭션 경계**를 정한다. 여러 Repository 호출이 하나의 단위로 성공하거나 실패한다.
+- HTTP를 몰라야 한다. 같은 Service를 웹 요청, 배치 작업, 메시지 소비자에서도 호출할 수 있어야 한다.
+
+### 6. Repository: 데이터 접근
+
+Spring Data JPA에서는 `JpaRepository`를 상속한 **인터페이스만 선언**하면, Spring이 시작할 때 구현 객체(프록시)를 만들어 빈으로 등록한다.
+
+- `findById(1L)`을 호출하면 JPA 구현체(보통 Hibernate)가 SQL을 만들고,
+- **커넥션 풀**(Spring Boot 기본은 HikariCP)에서 DB 커넥션을 빌려 JDBC로 SQL을 실행한다.
+- 결과 행을 엔티티 객체로 바꿔 돌려준다.
+
+### 7. Database: SQL 실행
+
+데이터베이스가 SQL을 실행하고 결과 행을 돌려준다. 인덱스가 있는지, 다른 트랜잭션이 잠금을 쥐고 있는지에 따라 이 단계의 시간이 크게 달라진다.
+
+### 8. 응답이 거꾸로 올라간다
+
+1. Repository가 엔티티를 반환하고, Service가 이를 응답용 DTO로 바꿔 반환한다(트랜잭션은 여기서 커밋된다).
+2. Controller가 DTO를 반환하면, `@ResponseBody` 때문에 Spring은 이를 뷰 이름이 아닌 **응답 본문**으로 다룬다.
+3. 요청의 `Accept` 헤더와 반환 타입을 보고 알맞은 **HttpMessageConverter**를 고른다. JSON이면 Jackson 기반 컨버터가 객체를 JSON으로 직렬화하고 `Content-Type: application/json`을 설정한다.
+4. 인터셉터와 필터를 역순으로 거쳐, Tomcat이 응답을 네트워크로 내보낸다.
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{"id":1,"name":"기계식 키보드","price":89000}
+```
+
+상태 줄의 사유 문구(`OK`)는 선택 사항이라 서버에 따라 생략되기도 한다. 클라이언트는 숫자 상태 코드로 결과를 판단한다.
+
+## 시각화
+
+아래 시뮬레이터에서 버튼을 눌러 `GET /api/products/1` 요청을 보내 보자. 요청이 브라우저에서 데이터베이스까지 내려갔다가, `200 OK` JSON 응답이 거꾸로 올라오는 과정을 볼 수 있다. 각 계층을 클릭하면 그 계층의 역할과 Spring Boot 코드 조각이 나온다.
+
+<Simulator />
+
+시뮬레이터는 흐름을 보여 주기 위해 다음을 **생략하거나 단순화**했다.
+
+- DNS 조회, TCP·TLS 연결, HTTP keep-alive와 로드 밸런서·API 게이트웨이
+- 서블릿 **필터 체인**(Spring Security 포함)과 **HandlerInterceptor**
+- HandlerMapping·HandlerAdapter·인자 변환 같은 DispatcherServlet 내부 단계
+- `@Transactional` **프록시**, JPA 영속성 컨텍스트와 1차 캐시, **커넥션 풀**에서 커넥션을 빌리고 반납하는 과정
+- 애플리케이션 캐시(예: Redis)나 외부 API 호출
+- 예외가 났을 때의 오류 응답 경로
+
+오류 경로는 아래처럼 흐른다. 상품이 없을 때 `200`과 빈 본문이 아니라 `404`를 돌려주는 것이 HTTP 의미에 맞다.
+
+<Sequence
+  title="상품이 없을 때: 예외가 404 응답으로 바뀌는 과정"
+  actors={['브라우저', 'DispatcherServlet', 'Controller', 'Service', 'Repository']}
+  messages={[
+    { from: '브라우저', to: 'DispatcherServlet', label: 'GET /api/products/999' },
+    { from: 'DispatcherServlet', to: 'Controller', label: 'getProduct(999)' },
+    { from: 'Controller', to: 'Service', label: 'find(999)' },
+    { from: 'Service', to: 'Repository', label: 'findById(999)' },
+    { from: 'Repository', to: 'Service', label: 'Optional.empty()' },
+    { from: 'Service', to: 'DispatcherServlet', label: 'ProductNotFoundException', note: '예외가 Controller를 거쳐 위로 전파된다' },
+    { from: 'DispatcherServlet', to: '브라우저', label: '404 Not Found', note: '@RestControllerAdvice가 예외를 오류 응답으로 변환' },
+  ]}
+/>
+
+## 코드 예시
+
+시뮬레이터의 각 계층에 해당하는 최소한의 Spring Boot 코드다.
+
+### Entity와 Repository
+
+```java
+@Entity
+public class Product {
+    @Id @GeneratedValue
+    private Long id;
+
+    private String name;
+    private long price;
+
+    protected Product() {} // JPA용 기본 생성자
+
+    public Long getId() { return id; }
+    public String getName() { return name; }
+    public long getPrice() { return price; }
+}
+```
+
+```java
+// 구현 클래스를 만들지 않는다. Spring Data JPA가 실행 시점에 구현을 만든다.
+public interface ProductRepository extends JpaRepository<Product, Long> {
+}
+```
+
+### Service
+
+```java
+@Service
+@Transactional(readOnly = true)
+public class ProductService {
+
+    private final ProductRepository productRepository;
+
+    public ProductService(ProductRepository productRepository) {
+        this.productRepository = productRepository;
+    }
+
+    public ProductResponse find(Long id) {
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new ProductNotFoundException(id));
+        return ProductResponse.from(product); // 엔티티 대신 DTO로 변환해 반환
+    }
+}
+```
+
+### 응답 DTO와 예외
+
+```java
+public record ProductResponse(Long id, String name, long price) {
+    public static ProductResponse from(Product product) {
+        return new ProductResponse(product.getId(), product.getName(), product.getPrice());
+    }
+}
+
+public class ProductNotFoundException extends RuntimeException {
+    public ProductNotFoundException(Long id) {
+        super("상품을 찾을 수 없습니다: " + id);
+    }
+}
+```
+
+### Controller와 예외 처리
+
+```java
+@RestController
+@RequestMapping("/api/products")
+public class ProductController {
+
+    private final ProductService productService;
+
+    public ProductController(ProductService productService) {
+        this.productService = productService;
+    }
+
+    @GetMapping("/{id}")
+    public ProductResponse getProduct(@PathVariable Long id) {
+        return productService.find(id); // 반환값은 Jackson이 JSON으로 직렬화한다
+    }
+}
+```
+
+```java
+@RestControllerAdvice
+public class ApiExceptionHandler {
+
+    @ExceptionHandler(ProductNotFoundException.class)
+    public ResponseEntity<ProblemDetail> handleNotFound(ProductNotFoundException e) {
+        ProblemDetail body = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body);
+    }
+}
+```
+
+### 직접 호출해 보기
+
+```bash
+curl -i http://localhost:8080/api/products/1
+```
+
+## 언제 사용해야 할까?
+
+계층을 나누는 목적은 **바뀌는 이유가 다른 코드를 분리**하는 것이다. 각 계층에 무엇을 두고, 무엇을 두지 말아야 하는지가 판단 기준이다.
+
+| 계층 | 맡는 일 | 두지 말아야 할 것 |
+| --- | --- | --- |
+| Filter / Interceptor | 인증, 로깅, CORS 등 모든 요청에 공통인 처리 | 특정 기능의 비즈니스 로직 |
+| Controller | 요청 값 추출·검증, Service 호출, 상태 코드와 응답 형식 결정 | 업무 규칙, SQL, 트랜잭션 |
+| Service | 업무 규칙, 여러 Repository 조합, 트랜잭션 경계 | `HttpServletRequest` 같은 HTTP 의존 코드 |
+| Repository | 데이터 저장·조회 | 업무 판단 (예: "VIP면 할인") |
+
+- **작은 CRUD 서비스**라면 이 3계층 구조만으로 충분한 경우가 많다.
+- **도메인 규칙이 복잡하거나** 외부 시스템(결제, 메시지 큐, 다른 API)이 많다면, 헥사고날 아키텍처처럼 핵심 로직이 외부 기술에 의존하지 않도록 경계를 더 엄격하게 나누는 구조를 검토한다.
+- **트래픽이 많은 조회**라면 Service 앞뒤에 캐시를 두거나, 조회 전용 모델을 따로 두는 등 경로 자체가 달라질 수 있다.
+
+## 주의 사항과 흔한 오해
+
+- **"모든 Spring 애플리케이션은 Controller → Service → Repository 구조다"** — 가장 흔한 출발점일 뿐이다. 계층 이름과 개수, 의존 방향은 팀과 시스템마다 다르다. 이 구조를 기준으로 삼되 정답으로 외우지는 말자.
+- **"Controller, Service, Repository는 각각 따로 통신한다"** — 같은 JVM 안의 메서드 호출이다. 네트워크 비용이 드는 구간은 클라이언트와 서버 사이, 서버와 DB(또는 외부 시스템) 사이다. 그래서 성능 문제는 대부분 이 두 구간, 특히 DB 쿼리 수와 쿼리 속도에서 나온다.
+- **"`@RestController`가 JSON을 만든다"** — 정확히는 반환값을 응답 본문으로 쓰라는 표시(`@ResponseBody`)일 뿐이고, 실제 변환은 `HttpMessageConverter`가 한다. 요청의 `Accept` 헤더에 맞는 컨버터가 없으면 `406 Not Acceptable`이, 요청 본문의 `Content-Type`을 읽을 컨버터가 없으면 `415 Unsupported Media Type`이 날 수 있다.
+- **엔티티를 그대로 응답으로 반환하지 말자.** Jackson이 getter를 따라가며 지연 로딩을 일으켜 쿼리가 폭증하거나(N+1), 양방향 연관 때문에 무한 순환이 생기거나, 노출하면 안 되는 필드가 그대로 나갈 수 있다. 응답 전용 DTO로 변환하자.
+- **"요청 하나는 항상 스레드 하나가 처리한다"** — 전통적인 서블릿 스택(Spring MVC)의 기본 모델이다. 비동기 요청 처리, 가상 스레드, WebFlux 같은 리액티브 스택에서는 스레드 사용 방식이 다르다.
+- **"200이면 성공이다"만으로는 부족하다.** 자원이 없으면 `404`, 입력이 잘못되면 `400`, 서버 오류면 `500`처럼 상황에 맞는 상태 코드를 돌려줘야 클라이언트와 모니터링 도구가 올바르게 판단할 수 있다.
+- **필터와 인터셉터의 위치를 구분하자.** 필터는 서블릿 컨테이너 수준에서 DispatcherServlet **앞**에, 인터셉터는 DispatcherServlet **안**에서 컨트롤러 호출 전후에 동작한다. Spring Security는 필터 체인으로 동작하므로, 인증 실패는 컨트롤러에 도달하기 전에 응답될 수 있다.

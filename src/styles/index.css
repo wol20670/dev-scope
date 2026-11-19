@@ -1,0 +1,148 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic',
+    system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* 표면 (짙은 네이비) */
+  --color-canvas: #070b14;
+  --color-surface: #0c1220;
+  --color-raised: #111a2c;
+  --color-overlay: #16213a;
+  --color-line: #1d2943;
+  --color-line-strong: #2b3a5c;
+
+  /* 텍스트 */
+  --color-fg: #e6ecf5;
+  --color-muted: #9aa8bf;
+  --color-subtle: #66758f;
+
+  /* 강조 (블루·시안) */
+  --color-accent: #38bdf8;
+  --color-accent-strong: #0ea5e9;
+  --color-accent-soft: #38bdf81f;
+  --color-brand: #6ea8ff;
+
+  /* 상태 */
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --color-bad: #f87171;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    background: var(--color-canvas);
+    -webkit-text-size-adjust: 100%;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    html {
+      scroll-behavior: smooth;
+    }
+  }
+  body {
+    @apply bg-canvas text-fg font-sans antialiased;
+    font-feature-settings: 'ss06';
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+  ::selection {
+    background: #38bdf855;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  code,
+  kbd,
+  pre {
+    font-family: var(--font-mono);
+  }
+}
+
+@layer components {
+  /* 은은한 격자 배경 (히어로 등) */
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, #ffffff08 1px, transparent 1px), linear-gradient(to bottom, #ffffff08 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  .card {
+    @apply rounded-2xl border border-line bg-surface;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-line bg-raised px-2.5 py-0.5 text-xs text-muted;
+  }
+
+  /* ---------- MDX 본문 (.not-prose 안쪽, 예: 시뮬레이터에는 적용하지 않음) ---------- */
+  .prose-ds {
+    @apply text-[15.5px] leading-[1.85] text-fg/90;
+  }
+  .prose-ds > * + * {
+    margin-top: 1.1em;
+  }
+  .prose-ds h2:not(.not-prose *) {
+    @apply mt-16 mb-5 flex items-center gap-3 text-2xl font-bold tracking-tight text-fg;
+    scroll-margin-top: 6rem;
+  }
+  .prose-ds h2:not(.not-prose *)::before {
+    content: '';
+    @apply h-6 w-1 shrink-0 rounded-full bg-accent;
+  }
+  .prose-ds > h2:first-child {
+    @apply mt-0;
+  }
+  .prose-ds h3:not(.not-prose *) {
+    @apply mt-10 mb-3 text-lg font-semibold text-fg;
+    scroll-margin-top: 6rem;
+  }
+  .prose-ds strong:not(.not-prose *) {
+    @apply font-semibold text-fg;
+  }
+  .prose-ds a:not(.not-prose *) {
+    @apply text-accent underline decoration-accent/40 underline-offset-4 hover:decoration-accent;
+  }
+  .prose-ds ul:not(.not-prose *),
+  .prose-ds ol:not(.not-prose *) {
+    @apply space-y-1.5 pl-6;
+  }
+  .prose-ds ul:not(.not-prose *) {
+    list-style: disc;
+  }
+  .prose-ds ol:not(.not-prose *) {
+    list-style: decimal;
+  }
+  .prose-ds li:not(.not-prose *)::marker {
+    @apply text-subtle;
+  }
+  .prose-ds :not(pre) > code:not(.not-prose *) {
+    @apply rounded-md border border-line bg-raised px-1.5 py-0.5 text-[0.86em] text-sky-200;
+  }
+  .prose-ds pre:not(.not-prose *) {
+    @apply overflow-x-auto rounded-xl border border-line p-4 text-[13.5px] leading-relaxed;
+  }
+  .prose-ds pre.shiki:not(.not-prose *) {
+    background-color: #0a0f1a !important;
+  }
+  .prose-ds table:not(.not-prose *) {
+    @apply block w-full overflow-x-auto text-sm;
+    border-collapse: collapse;
+  }
+  .prose-ds th:not(.not-prose *),
+  .prose-ds td:not(.not-prose *) {
+    @apply border-b border-line px-3 py-2.5 text-left align-top;
+  }
+  .prose-ds th:not(.not-prose *) {
+    @apply bg-raised font-semibold whitespace-nowrap text-fg;
+  }
+  .prose-ds blockquote:not(.not-prose *) {
+    @apply border-l-2 border-accent/60 pl-4 text-muted;
+  }
+  .prose-ds hr:not(.not-prose *) {
+    @apply border-line;
+  }
+}

@@ -1,0 +1,315 @@
+## 왜 필요한가?
+
+프론트엔드는 `http://localhost:5173`(Vite 개발 서버)에서, 백엔드는 `http://localhost:8080`(Spring Boot)에서 띄우고 API를 호출했더니 브라우저 콘솔에 이런 에러가 뜬다.
+
+```bash
+Access to fetch at 'http://localhost:8080/api/orders' from origin 'http://localhost:5173'
+has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present
+on the requested resource.
+```
+
+그런데 같은 주소를 Postman이나 `curl`로 호출하면 잘 된다. 서버 로그를 보면 요청이 들어와 정상 처리된 기록까지 있다. 무엇이 막은 걸까?
+
+막은 주체는 **브라우저**다. 브라우저에는 **동일 출처 정책(Same-Origin Policy)** 이 있다. 사용자가 `evil.example`을 열었을 때, 그 페이지의 스크립트가 사용자의 쿠키를 실어 `bank.example`의 API를 호출하고 **응답(잔액, 개인정보)을 읽어 가는 것**을 막기 위한 규칙이다. 이 규칙 덕분에 사용자는 여러 사이트를 동시에 열어도 안전하다.
+
+하지만 프론트엔드와 API 서버를 다른 도메인·포트로 분리하는 것은 지극히 정상적인 구성이다. 그래서 서버가 "이 출처는 내 응답을 읽어도 된다"고 **명시적으로 허락하는 방법**이 필요하고, 그것이 **CORS(Cross-Origin Resource Sharing)** 다.
+
+## 쉽게 이해하는 비유
+
+**아파트 경비실**을 떠올려 보자.
+
+- 입주민(스크립트)은 자기 동(같은 출처)의 우편함은 자유롭게 열어 볼 수 있다.
+- 다른 동의 우편물(다른 출처의 응답)을 받아 보려면, 그 동 주민이 경비실에 **"101동 사람에게 내 우편물을 전달해도 됩니다"** 라는 허락서(CORS 응답 헤더)를 남겨 둬야 한다.
+- 경비원(브라우저)은 허락서를 확인한 뒤에만 우편물을 넘겨준다. 허락서가 없으면 우편물은 이미 도착했어도 전달하지 않는다.
+- 부피가 큰 택배(프리플라이트가 필요한 요청)는 보내기 전에 경비원이 먼저 **"이런 물건 보내도 되나요?"** 라고 전화로 확인한다.
+
+이 비유에서 중요한 점은 **경비원은 아파트 주민 사이에서만 일한다**는 것이다. 아파트 밖에서 직접 찾아오는 사람(curl, 서버 간 호출)에게는 경비원이 없다. 그래서 CORS는 서버를 지키는 담장이 아니라, **브라우저 안에서 사용자를 지키는 규칙**이다.
+
+## 동작 원리
+
+### 출처(Origin)란?
+
+출처는 **스킴(프로토콜) + 호스트 + 포트**의 조합이다. 셋 중 하나라도 다르면 다른 출처다.
+
+| 비교 대상 (기준: `https://app.example.com`) | 같은 출처? | 이유 |
+| --- | --- | --- |
+| `https://app.example.com/orders` | 같다 | 경로는 상관없다 |
+| `http://app.example.com` | 다르다 | 스킴이 다르다 |
+| `https://api.example.com` | 다르다 | 호스트가 다르다 (서브도메인도 다른 호스트) |
+| `https://app.example.com:8443` | 다르다 | 포트가 다르다 (`https` 기본 포트는 443) |
+
+`localhost:5173`과 `localhost:8080`이 다른 출처인 이유가 바로 포트다.
+
+브라우저는 다른 출처로 `fetch`/`XMLHttpRequest` 요청을 보낼 때 요청에 **`Origin` 헤더**를 붙여 어디서 온 요청인지 알려 준다. 서버는 이 값을 보고 허용 여부를 응답 헤더로 답한다.
+
+### 동일 출처 정책이 막는 것과 막지 않는 것
+
+동일 출처 정책은 "다른 출처와의 모든 통신"을 막는 것이 아니다.
+
+- `<img src>`, `<script src>`, `<link rel="stylesheet">`, `<form>` 제출처럼 HTML이 원래 하던 다른 출처 요청은 대부분 허용된다.
+- 막히는 핵심은 **스크립트가 다른 출처의 응답 내용을 읽는 것**이다. `fetch`로 다른 출처를 호출하면 요청 자체는 나갈 수 있어도, CORS 허락이 없으면 응답을 스크립트에 넘겨주지 않는다.
+
+### 단순 요청 (Simple Request)
+
+다음 조건을 **모두** 만족하는 요청은 프리플라이트 없이 바로 전송된다. ("단순 요청"은 MDN 등에서 쓰는 설명용 이름이고, 현재 Fetch 표준은 이를 CORS 안전 목록(safelisted) 메서드·헤더 조건으로 정의한다.)
+
+- 메서드가 `GET`, `HEAD`, `POST` 중 하나
+- 직접 설정한 헤더가 `Accept`, `Accept-Language`, `Content-Language`, `Content-Type`, `Range` 같은 **CORS 안전 목록(safelisted) 헤더**뿐
+- `Content-Type`이 있다면 `application/x-www-form-urlencoded`, `multipart/form-data`, `text/plain` 중 하나
+
+이 조건은 "HTML `<form>`으로도 원래 보낼 수 있던 요청"과 거의 같다. 이미 가능했던 요청이므로 새로 막을 이유가 없다는 것이다.
+
+단순 요청의 흐름은 다음과 같다.
+
+1. 브라우저가 `Origin` 헤더를 붙여 요청을 **그대로 보낸다**.
+2. 서버는 요청을 **처리하고** 응답한다.
+3. 브라우저가 응답의 `Access-Control-Allow-Origin`을 확인한다. 요청 출처와 맞으면 스크립트가 응답을 읽고, 아니면 응답을 버리고 에러를 낸다.
+
+즉 단순 요청에서는 **CORS 에러가 나도 서버는 이미 요청을 받아 처리했다**. 처음 예시에서 서버 로그에 처리 기록이 남은 이유다.
+
+### 프리플라이트 요청 (Preflight Request)
+
+단순 요청 조건을 벗어나면 브라우저는 본 요청 전에 **`OPTIONS` 메서드로 허락을 먼저 구한다**. 실무에서 흔한 원인은 다음과 같다.
+
+- `Content-Type: application/json`으로 보내는 `POST`
+- `PUT`, `PATCH`, `DELETE` 메서드
+- `Authorization` 같은 커스텀 헤더
+
+프리플라이트 요청에는 본 요청에 대한 정보가 담긴다.
+
+- `Origin`: 요청한 출처
+- `Access-Control-Request-Method`: 본 요청에서 쓸 메서드
+- `Access-Control-Request-Headers`: 본 요청에서 쓸, 안전 목록에 없는 헤더들
+
+서버가 허용한다고 답하면(`Access-Control-Allow-Origin`, `Access-Control-Allow-Methods`, `Access-Control-Allow-Headers`) 브라우저가 본 요청을 보낸다. 허용하지 않으면 **본 요청은 아예 보내지 않는다**. 단순 요청과 달리 서버에 부수 효과가 생기기 전에 멈추는 것이다.
+
+`Access-Control-Max-Age`로 프리플라이트 결과를 일정 시간 캐시하게 하면 매 요청마다 `OPTIONS`가 나가는 것을 줄일 수 있다. 다만 브라우저마다 허용하는 최댓값이 있어 그보다 큰 값은 잘린다.
+
+### 주요 응답 헤더
+
+| 헤더 | 의미 |
+| --- | --- |
+| `Access-Control-Allow-Origin` | 응답을 읽어도 되는 출처. 하나의 출처 또는 `*` |
+| `Access-Control-Allow-Methods` | (프리플라이트) 허용하는 메서드 목록 |
+| `Access-Control-Allow-Headers` | (프리플라이트) 허용하는 요청 헤더 목록 |
+| `Access-Control-Allow-Credentials` | `true`이면 자격 증명을 포함한 요청의 응답을 읽도록 허락 |
+| `Access-Control-Max-Age` | (프리플라이트) 결과를 캐시할 수 있는 초 단위 시간 |
+| `Access-Control-Expose-Headers` | 스크립트가 읽을 수 있게 추가로 노출할 응답 헤더. 기본적으로는 `Content-Type` 같은 일부 안전 목록 헤더만 읽을 수 있다 |
+
+`Access-Control-Allow-Origin`에는 출처를 **하나만** 쓸 수 있다. 여러 출처를 허용하려면 서버가 요청의 `Origin`을 허용 목록과 비교해 일치하는 값을 그대로 돌려줘야 한다. 이때 응답이 `Origin`에 따라 달라지므로 `Vary: Origin` 헤더를 함께 보내 캐시가 다른 출처의 응답을 재사용하지 않게 한다(Spring 등 대부분의 프레임워크가 자동으로 처리한다).
+
+### 자격 증명(Credentials)과 와일드카드
+
+브라우저는 기본적으로 다른 출처 요청에 쿠키나 HTTP 인증 정보를 싣지 않는다. 쿠키 기반 세션을 쓰려면:
+
+- 클라이언트: `fetch`에 `credentials: 'include'`(XHR은 `withCredentials = true`)를 지정한다.
+- 서버: `Access-Control-Allow-Credentials: true`를 응답한다.
+- 서버: 이때 `Access-Control-Allow-Origin`, `Access-Control-Allow-Headers`, `Access-Control-Allow-Methods`, `Access-Control-Expose-Headers`에 **`*`를 쓸 수 없다**. 명시적인 값이어야 한다.
+
+와일드카드를 금지하는 이유는 "아무 사이트나 사용자의 쿠키로 요청하고 응답까지 읽을 수 있다"는 상태를 실수로라도 만들지 못하게 하려는 것이다. 또 서버가 허락해도 브라우저의 서드파티 쿠키 차단 정책이나 쿠키의 `SameSite` 속성 때문에 쿠키가 전송되지 않을 수 있다. 이 부분은 브라우저와 설정에 따라 다르다.
+
+참고로 프리플라이트 요청 자체에는 쿠키가 실리지 않는다. 서버가 `OPTIONS` 요청에 인증을 요구하면 프리플라이트가 실패하므로, 프리플라이트는 인증 검사보다 먼저 처리되어야 한다.
+
+## 시각화
+
+먼저 단순 요청이다. 요청은 서버까지 가서 처리되고, **응답을 스크립트에 넘길지**만 브라우저가 결정한다.
+
+<Sequence
+  title="단순 요청 (GET)"
+  actors={['스크립트', '브라우저', 'API 서버']}
+  messages={[
+    { from: '스크립트', to: '브라우저', label: "fetch('https://api.example.com/items')" },
+    { from: '브라우저', to: 'API 서버', label: 'GET /items', note: 'Origin: https://app.example.com 헤더를 자동으로 추가' },
+    { from: 'API 서버', to: '브라우저', label: '200 OK', note: 'Access-Control-Allow-Origin: https://app.example.com' },
+    { from: '브라우저', to: '브라우저', label: 'CORS 검사', note: '허용 출처가 요청 출처와 일치하는지 확인' },
+    { from: '브라우저', to: '스크립트', label: '응답 전달', note: '헤더가 없거나 불일치하면 응답을 버리고 TypeError로 실패시킨다' },
+  ]}
+/>
+
+다음은 JSON을 보내는 `POST`처럼 프리플라이트가 필요한 요청이다. 허락이 확인된 뒤에야 본 요청이 나간다.
+
+<Sequence
+  title="프리플라이트가 필요한 요청 (JSON POST + 쿠키)"
+  actors={['스크립트', '브라우저', 'API 서버']}
+  messages={[
+    { from: '스크립트', to: '브라우저', label: 'fetch(url, POST, JSON, credentials include)' },
+    { from: '브라우저', to: 'API 서버', label: 'OPTIONS /orders', note: 'Origin, Access-Control-Request-Method: POST, Access-Control-Request-Headers: content-type (쿠키 없음)' },
+    { from: 'API 서버', to: '브라우저', label: '200 또는 204', note: 'Allow-Origin: https://app.example.com, Allow-Methods: POST, Allow-Headers: content-type, Allow-Credentials: true, Max-Age' },
+    { from: '브라우저', to: '브라우저', label: '프리플라이트 검사', note: '허락되지 않으면 여기서 중단. 본 요청은 전송되지 않는다' },
+    { from: '브라우저', to: 'API 서버', label: 'POST /orders', note: 'Origin, Content-Type: application/json, Cookie' },
+    { from: 'API 서버', to: '브라우저', label: '201 Created', note: '본 응답에도 Allow-Origin, Allow-Credentials가 있어야 한다' },
+    { from: '브라우저', to: '스크립트', label: '응답 전달' },
+  ]}
+/>
+
+브라우저가 요청 하나를 처리하며 내리는 판단을 순서대로 정리하면 다음과 같다. 실제 Fetch 표준 알고리즘을 단순화한 모델이다.
+
+<Flow
+  title="브라우저의 CORS 판단 순서 (단순화)"
+  steps={[
+    { title: '출처 비교', detail: '요청 URL의 스킴·호스트·포트가 현재 페이지와 같으면 CORS 검사 없이 진행' },
+    { title: '프리플라이트 필요 여부', detail: '메서드·헤더·Content-Type이 안전 목록을 벗어나면 OPTIONS를 먼저 보낸다 (캐시된 결과가 있으면 생략)' },
+    { title: '프리플라이트 응답 검사', detail: '허용 출처·메서드·헤더(자격 증명 포함 시 Allow-Credentials)를 확인. 실패하면 본 요청을 보내지 않는다' },
+    { title: '본 요청 전송', detail: 'Origin 헤더를 붙여 전송. 자격 증명 모드에 따라 쿠키 포함' },
+    { title: '본 응답 검사', detail: 'Access-Control-Allow-Origin 등을 다시 확인해 통과하면 스크립트에 응답을 넘긴다' },
+  ]}
+/>
+
+## 코드 예시
+
+### 프론트엔드: fetch
+
+```javascript
+// application/json + 쿠키 → 프리플라이트가 발생한다
+const response = await fetch('https://api.example.com/orders', {
+  method: 'POST',
+  credentials: 'include', // 다른 출처에 쿠키를 보내려면 필요하다
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ productId: 1, quantity: 2 }),
+})
+
+if (!response.ok) {
+  throw new Error(`주문 실패: ${response.status}`)
+}
+const order = await response.json()
+```
+
+CORS 검사에 실패하면 `fetch`는 `TypeError`로 거부(reject)된다. 보안상 스크립트에는 실패 이유가 전달되지 않으므로, 원인은 **브라우저 개발자 도구의 콘솔과 네트워크 탭**에서 확인해야 한다.
+
+### 프리플라이트 HTTP 메시지
+
+```http
+OPTIONS /orders HTTP/1.1
+Host: api.example.com
+Origin: https://app.example.com
+Access-Control-Request-Method: POST
+Access-Control-Request-Headers: content-type
+```
+
+```http
+HTTP/1.1 204 No Content
+Access-Control-Allow-Origin: https://app.example.com
+Access-Control-Allow-Methods: GET, POST
+Access-Control-Allow-Headers: content-type
+Access-Control-Allow-Credentials: true
+Access-Control-Max-Age: 3600
+Vary: Origin
+```
+
+### Spring MVC: 전역 설정
+
+```java
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+@Configuration
+public class WebConfig implements WebMvcConfigurer {
+
+    @Override
+    public void addCorsMappings(CorsRegistry registry) {
+        registry.addMapping("/api/**")
+                .allowedOrigins("https://app.example.com", "http://localhost:5173")
+                .allowedMethods("GET", "POST", "PUT", "DELETE")
+                .allowedHeaders("Content-Type", "Authorization")
+                .allowCredentials(true) // 이때 allowedOrigins에 "*"를 쓸 수 없다
+                .maxAge(3600);
+    }
+}
+```
+
+Spring 전역 CORS 설정의 기본값은 모든 출처·모든 헤더와 `GET`, `HEAD`, `POST` 메서드 허용이며, `allowCredentials`는 기본적으로 꺼져 있다. 자격 증명을 허용하면서 출처를 패턴으로 지정해야 한다면 `allowedOrigins` 대신 `allowedOriginPatterns("https://*.example.com")`를 쓴다. 컨트롤러나 메서드 단위로는 `@CrossOrigin`을 붙일 수도 있다.
+
+### Spring Security를 쓸 때
+
+Spring Security를 쓰면 CORS를 **Security 필터 체인에서** 처리해야 한다. 프리플라이트 요청에는 쿠키(세션 ID)가 없으므로, 보안 필터가 먼저 실행되면 인증되지 않은 요청으로 보고 거부하기 때문이다.
+
+```java
+import static org.springframework.security.config.Customizer.withDefaults;
+
+import java.util.List;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+            .cors(withDefaults()) // 아래 CorsConfigurationSource 빈을 사용한다
+            .authorizeHttpRequests(authorize -> authorize
+                .requestMatchers("/api/public/**").permitAll()
+                .anyRequest().authenticated()
+            );
+        return http.build();
+    }
+
+    @Bean
+    public UrlBasedCorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(List.of("https://app.example.com"));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE"));
+        config.setAllowedHeaders(List.of("Content-Type", "Authorization"));
+        config.setAllowCredentials(true);
+        config.setMaxAge(3600L);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/api/**", config);
+        return source;
+    }
+}
+```
+
+`CorsConfigurationSource` 빈이 없고 Spring MVC가 있으면, `.cors(withDefaults())`는 앞의 `WebMvcConfigurer` 설정을 그대로 사용한다. 두 곳에 설정을 중복으로 두기보다 한 곳에 모으자.
+
+### 개발 환경에서는 프록시로 같은 출처 만들기
+
+개발 중에는 프론트엔드 개발 서버가 API 요청을 대신 전달하게 하면 브라우저 입장에서 같은 출처가 되어 CORS 자체가 필요 없다.
+
+```typescript
+// vite.config.ts
+import { defineConfig } from 'vite'
+
+export default defineConfig({
+  server: {
+    proxy: {
+      // 브라우저는 localhost:5173/api 로 요청하고, Vite가 8080으로 전달한다
+      '/api': 'http://localhost:8080',
+    },
+  },
+})
+```
+
+운영 환경에서도 리버스 프록시(Nginx 등)로 프론트엔드와 API를 같은 출처 아래에 두면 CORS 설정이 필요 없다.
+
+## 언제 사용해야 할까?
+
+| 상황 | 필요한 설정 |
+| --- | --- |
+| 프론트엔드와 API가 같은 출처 (리버스 프록시로 묶음) | CORS 설정 불필요 |
+| 다른 출처의 프론트엔드가 공개 API 호출 (쿠키 없음) | `Access-Control-Allow-Origin`에 허용 출처 (공개 데이터라면 `*`도 가능) |
+| 다른 출처에서 쿠키 세션으로 API 호출 | 명시적 출처 + `Allow-Credentials: true` + 클라이언트 `credentials: 'include'` |
+| JSON 본문, `Authorization` 헤더, `PUT`/`DELETE` 사용 | 프리플라이트 대응 (`Allow-Methods`, `Allow-Headers`, `Max-Age`) |
+| 서버 간 호출, 배치, 모바일 앱의 네이티브 HTTP 클라이언트 | CORS와 무관 (브라우저가 아니다) |
+| 응답의 커스텀 헤더(예: `X-Total-Count`)를 스크립트에서 읽어야 함 | `Access-Control-Expose-Headers` |
+
+- 허용 출처는 **실제로 쓰는 프론트엔드 출처만** 나열한다. 운영 설정에 `localhost`가 남지 않도록 환경별로 분리하자.
+- 요청의 `Origin`을 검사 없이 그대로 `Access-Control-Allow-Origin`에 반사하고 `Allow-Credentials: true`까지 주면, 사실상 모든 사이트에 사용자 데이터를 읽도록 허락하는 것과 같다.
+
+## 주의 사항과 흔한 오해
+
+- **"CORS 에러가 났으니 서버는 요청을 받지 못했다"** — 단순 요청이라면 서버는 요청을 받아 처리했고, 브라우저가 응답 전달만 막은 것이다. 요청이 아예 가지 않는 것은 프리플라이트가 실패한 경우다.
+- **"CORS는 서버를 보호하는 보안 장치다"** — CORS를 집행하는 것은 브라우저이며, curl·Postman·서버 간 호출은 CORS 헤더를 신경 쓰지 않는다. 오히려 CORS는 동일 출처 정책이라는 제한을 **완화**하는 장치다. API 보호는 인증·인가로 해야 한다.
+- **"CORS 설정이 CSRF를 막아 준다"** — 단순 요청(예: 폼 형식의 `POST`)은 CORS 허락이 없어도 쿠키와 함께 서버에 도착해 처리될 수 있다. CSRF는 CSRF 토큰, `SameSite` 쿠키, `Origin` 헤더 검증 등으로 따로 막아야 한다.
+- **"`Access-Control-Allow-Origin: *`이면 다 된다"** — 자격 증명(쿠키)을 포함한 요청에는 `*`가 허용되지 않아 오히려 실패한다.
+- **"`mode: 'no-cors'`로 바꾸면 해결된다"** — 에러는 사라지지만 응답이 내용을 읽을 수 없는 불투명(opaque) 응답이 되어 본문과 상태 코드를 쓸 수 없다. 원하는 것이 응답 데이터라면 해결책이 아니다.
+- **"CORS 에러는 프론트엔드 문제다"** — 허락은 서버가 응답 헤더로 해야 한다. 프론트엔드가 요청 헤더에 `Access-Control-Allow-Origin`을 넣어도 아무 효과가 없고, 오히려 안전 목록에 없는 헤더라 프리플라이트만 유발한다.
+- **에러 응답에도 CORS 헤더가 필요하다.** 서버가 401·500을 반환하면서 CORS 헤더를 빠뜨리면, 브라우저에는 실제 에러 대신 CORS 에러만 보인다. 예외 처리 경로나 앞단의 게이트웨이·프록시에서 헤더가 빠지지 않는지 확인하자.

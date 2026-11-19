@@ -1,0 +1,75 @@
+import type { ConceptMeta } from '../../../types/concept'
+
+export default {
+  id: 'transaction-isolation',
+  slug: 'transaction-isolation',
+  title: '트랜잭션 격리 수준',
+  description:
+    '동시에 실행되는 트랜잭션이 서로의 변경을 어디까지 볼 수 있는지 정하는 규칙. 정합성과 동시성 사이의 트레이드오프를 조절한다.',
+  category: 'database-infra',
+  tags: ['트랜잭션', '동시성', 'SQL', 'Spring'],
+  aliases: [
+    'Transaction Isolation Level',
+    'Isolation Level',
+    '격리 수준',
+    '고립 수준',
+    'READ UNCOMMITTED',
+    'READ COMMITTED',
+    'REPEATABLE READ',
+    'SERIALIZABLE',
+  ],
+  keywords: [
+    'Dirty Read',
+    'Non-repeatable Read',
+    'Phantom Read',
+    '더티 리드',
+    '팬텀 리드',
+    'MVCC',
+    '스냅샷',
+    'Snapshot',
+    'next-key lock',
+    '@Transactional(isolation)',
+    'Isolation.REPEATABLE_READ',
+    'ACID',
+    'serialization failure',
+  ],
+  difficulty: 'intermediate',
+  prerequisites: ['spring-transaction'],
+  relatedConcepts: ['optimistic-pessimistic-lock', 'spring-transaction', 'database-index'],
+  visualizationType: 'isolation',
+  keyPoints: [
+    '격리 수준은 ACID의 I(Isolation)를 얼마나 엄격하게 지킬지 정하며, 높을수록 이상 현상이 줄고 동시성 비용이 늘어난다.',
+    'SQL 표준은 격리 수준별로 Dirty Read, Non-repeatable Read, Phantom Read 중 무엇이 "허용되는지"만 정의한다.',
+    '실제 방지 방식은 DBMS마다 다르다. PostgreSQL은 스냅샷(MVCC)과 직렬화 실패로, MySQL InnoDB의 SERIALIZABLE은 잠금 읽기로 막는다.',
+    '기본 격리 수준은 PostgreSQL이 READ COMMITTED, MySQL InnoDB가 REPEATABLE READ다.',
+    '격리 수준만으로 갱신 손실 같은 쓰기 충돌이 모두 해결되지는 않는다. 필요하면 락이나 재시도를 함께 설계한다.',
+  ],
+  references: [
+    {
+      title: 'Transaction Isolation',
+      url: 'https://www.postgresql.org/docs/current/transaction-iso.html',
+      publisher: 'PostgreSQL Docs',
+    },
+    {
+      title: 'Transaction Isolation Levels',
+      url: 'https://dev.mysql.com/doc/refman/8.4/en/innodb-transaction-isolation-levels.html',
+      publisher: 'MySQL 8.4 Reference Manual',
+    },
+    {
+      title: 'Consistent Nonlocking Reads',
+      url: 'https://dev.mysql.com/doc/refman/8.4/en/innodb-consistent-read.html',
+      publisher: 'MySQL 8.4 Reference Manual',
+    },
+    {
+      title: 'Isolation (Javadoc)',
+      url: 'https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/transaction/annotation/Isolation.html',
+      publisher: 'Spring Framework API',
+    },
+    {
+      title: 'Using @Transactional',
+      url: 'https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/annotations.html',
+      publisher: 'Spring Framework Reference',
+    },
+  ],
+  updatedAt: '2026-11-19',
+} satisfies ConceptMeta

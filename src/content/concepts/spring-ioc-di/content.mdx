@@ -1,0 +1,227 @@
+## 왜 필요한가?
+
+주문 서비스가 주문 저장소와 할인 정책을 사용한다고 해 보자. 가장 단순하게는 필요한 객체를 직접 만든다.
+
+```java
+public class OrderService {
+    private final OrderRepository orderRepository = new JdbcOrderRepository();
+    private final DiscountPolicy discountPolicy = new FixedDiscountPolicy();
+}
+```
+
+처음에는 문제가 없어 보이지만, 시간이 지나면 다음과 같은 일이 생긴다.
+
+1. **구현을 바꾸기 어렵다.** 할인 정책을 `RateDiscountPolicy`로 바꾸려면 `OrderService`의 코드를 고쳐야 한다. 이 정책을 쓰는 클래스가 열 개라면 열 곳을 고쳐야 한다.
+2. **테스트하기 어렵다.** `OrderService`만 테스트하고 싶어도 `new JdbcOrderRepository()`가 실제 DB 연결을 요구한다. 가짜 저장소로 바꿔 끼울 방법이 없다.
+3. **생성과 수명 관리가 흩어진다.** 저장소가 커넥션 풀 같은 무거운 자원을 쓴다면, 누가 언제 한 번만 만들고 언제 정리할지를 각 클래스가 신경 써야 한다.
+
+핵심 원인은 `OrderService`가 **"무엇을 쓸지"와 "어떻게 만들지"를 동시에 알고 있다**는 점이다. IoC와 DI는 이 둘을 분리한다. `OrderService`는 "할인 정책이 필요하다"고 선언만 하고, 실제로 어떤 구현을 만들어 넣을지는 바깥(Spring 컨테이너)이 결정한다.
+
+## 쉽게 이해하는 비유
+
+**식당 주방**을 떠올려 보자.
+
+- 직접 생성하는 방식은 요리사가 요리할 때마다 농장에 가서 재료를 사 오는 것과 같다. 요리사는 요리법뿐 아니라 어느 농장에 가야 하는지까지 알아야 하고, 거래처가 바뀌면 모든 요리사가 그 사실을 알아야 한다.
+- DI 방식에서는 요리사가 "양파 2개, 소고기 300g이 필요하다"는 **주문서만 낸다.** 주방 관리자(컨테이너)가 재료를 준비해 조리대에 올려 준다. 거래처가 바뀌어도 요리사는 신경 쓰지 않는다.
+
+"재료를 구하는 주도권"이 요리사에서 관리자로 넘어갔다. 이것이 **제어의 역전(Inversion of Control)** 이다.
+
+비유가 틀리는 지점도 있다. 주방 관리자는 요청이 올 때마다 재료를 구하러 뛰어다니지만, Spring 컨테이너는 보통 **애플리케이션이 시작될 때** 설정을 읽고 싱글톤 빈들을 미리 만들어 연결해 둔다. 요청을 처리하는 동안에는 이미 연결된 객체 그래프를 그대로 쓴다.
+
+## 동작 원리
+
+### IoC와 DI의 관계
+
+- **IoC(제어의 역전)** 는 더 넓은 원칙이다. 객체를 만들고, 연결하고, 수명을 관리하는 흐름의 제어권이 애플리케이션 코드가 아닌 프레임워크에 있다는 뜻이다.
+- **DI(의존성 주입)** 는 IoC의 구체적인 형태다. Spring 레퍼런스는 DI를 "객체가 자신이 함께 일할 객체(의존성)를 생성자 인자, 팩토리 메서드 인자, 또는 생성 후 설정되는 프로퍼티로만 정의하고, 컨테이너가 빈을 만들 때 그 의존성을 넣어 주는 것"으로 설명한다.
+
+즉 객체는 의존성을 **스스로 찾거나 만들지 않고, 받기만 한다.**
+
+### 컨테이너와 빈
+
+Spring에서 이 일을 하는 것이 **IoC 컨테이너**이고, 컨테이너가 관리하는 객체를 **빈(Bean)** 이라고 부른다.
+
+- `BeanFactory`는 빈을 관리하는 기본 기능을 정의한 인터페이스다.
+- `ApplicationContext`는 `BeanFactory`의 하위 인터페이스로, AOP 통합, 메시지 국제화, 이벤트 발행, 웹 애플리케이션용 컨텍스트 같은 기능을 더한다. 실무에서 "컨테이너"라고 하면 보통 `ApplicationContext`를 가리킨다.
+
+### 빈 정의를 등록하는 두 가지 방법
+
+컨테이너는 "어떤 클래스를, 어떤 이름과 스코프로, 무엇을 주입해서 만들지"를 담은 **빈 정의(BeanDefinition)** 를 먼저 모은다.
+
+1. **컴포넌트 스캔**: 지정한 패키지에서 `@Component`가 붙은 클래스를 찾아 빈으로 등록한다. `@Service`, `@Repository`, `@Controller`는 모두 `@Component`를 메타 애너테이션으로 가진 특수화된 형태다. Spring Boot에서는 `@SpringBootApplication`이 있는 클래스의 패키지와 그 하위 패키지가 기본 스캔 대상이다.
+2. **자바 설정(`@Configuration` + `@Bean`)**: 메서드가 반환하는 객체를 빈으로 등록한다. 외부 라이브러리 클래스처럼 소스에 애너테이션을 붙일 수 없거나, 생성 로직을 직접 쓰고 싶을 때 사용한다.
+
+### 주입 방식
+
+| 방식 | 형태 | 특징 |
+| --- | --- | --- |
+| 생성자 주입 | 생성자 파라미터 | 필드를 `final`로 둘 수 있고, 의존성이 빠진 객체가 만들어질 수 없다. Spring 팀이 권장한다. |
+| 세터 주입 | 세터 메서드 | 선택적 의존성이나 나중에 바꿀 수 있는 의존성에 쓴다. |
+| 필드 주입 | 필드에 `@Autowired` | 코드는 짧지만 `final`로 만들 수 없고, 컨테이너 없이 테스트할 때 값을 넣기 어렵다. |
+
+생성자가 **하나뿐이면** `@Autowired`를 생략해도 그 생성자로 주입된다. 생성자가 여러 개라면 사용할 생성자에 `@Autowired`를 붙여야 한다.
+
+### 같은 타입의 빈이 여러 개라면?
+
+`DiscountPolicy` 구현 빈이 두 개 있는데 생성자가 `DiscountPolicy` 하나를 요구하면, 컨테이너는 무엇을 넣을지 결정할 수 없어 시작 시점에 예외(`NoUniqueBeanDefinitionException`)를 던진다. 다음 중 하나로 해결한다.
+
+- `@Primary`: 여러 후보 중 기본으로 쓸 빈을 지정한다.
+- `@Qualifier("이름")`: 주입받는 쪽에서 원하는 빈을 명시한다.
+- `List<DiscountPolicy>`처럼 컬렉션으로 받으면 해당 타입의 빈을 모두 주입받는다.
+
+### 스코프: 빈은 몇 개 만들어질까?
+
+빈의 기본 스코프는 **싱글톤**이다. 여기서 싱글톤은 GoF 싱글톤 패턴처럼 JVM 전체에 하나가 아니라, **컨테이너 하나당 빈 정의 하나에 인스턴스 하나**라는 뜻이다. 그 밖에 요청할 때마다 새로 만드는 `prototype`, 웹 환경의 `request`·`session` 등이 있다.
+
+싱글톤 빈은 여러 요청 스레드가 동시에 같은 인스턴스를 사용한다. 따라서 **요청마다 달라지는 값을 빈의 필드에 저장하면 안 된다.**
+
+### 컨테이너가 넣어 주는 것은 프록시일 수 있다
+
+컨테이너는 빈을 만든 뒤 초기화 전후에 `BeanPostProcessor`를 거치게 한다. 이 단계에서 원본 객체를 감싼 **프록시**를 대신 등록할 수 있다. `@Transactional`, `@Async`, `@Cacheable` 같은 기능은 이렇게 끼워 넣은 프록시가 메서드 호출을 가로채서 동작한다. DI가 있기 때문에 사용하는 쪽 코드를 고치지 않고도 이런 부가 기능을 붙일 수 있다.
+
+## 시각화
+
+애플리케이션이 시작될 때 컨테이너가 싱글톤 빈을 준비하는 흐름이다. (지연 초기화를 설정한 빈은 처음 필요할 때 만들어진다.)
+
+<Flow
+  title="ApplicationContext가 싱글톤 빈을 준비하는 순서"
+  steps={[
+    { title: '빈 정의 수집', detail: '컴포넌트 스캔과 @Configuration 클래스의 @Bean 메서드를 읽어 BeanDefinition을 만든다' },
+    { title: '의존 관계 분석', detail: '각 빈의 생성자 파라미터 등을 보고 무엇이 먼저 만들어져야 하는지 파악한다' },
+    { title: '인스턴스 생성과 주입', detail: '의존 대상 빈을 먼저 만들고, 생성자 인자 등으로 전달해 객체를 만든다' },
+    { title: '초기화', detail: 'BeanPostProcessor와 @PostConstruct 같은 초기화 콜백이 실행된다' },
+    { title: '프록시 적용', detail: '필요하면 BeanPostProcessor가 원본 대신 프록시를 등록한다 (예: @Transactional)' },
+    { title: '사용과 종료', detail: '요청 처리에 빈을 사용하고, 컨텍스트가 닫힐 때 @PreDestroy 등 소멸 콜백이 실행된다' },
+  ]}
+/>
+
+같은 과정을 객체 사이의 메시지로 보면, 의존 대상이 먼저 만들어지고 그 결과가 다음 객체의 생성자로 전달된다.
+
+<Sequence
+  title="생성자 주입으로 객체 그래프가 연결되는 과정"
+  actors={['ApplicationContext', 'OrderRepository', 'RateDiscountPolicy', 'OrderService']}
+  messages={[
+    { from: 'ApplicationContext', to: 'OrderRepository', label: 'new JpaOrderRepository(...)', note: '의존성이 없는 빈부터 생성' },
+    { from: 'ApplicationContext', to: 'RateDiscountPolicy', label: 'new RateDiscountPolicy()' },
+    { from: 'ApplicationContext', to: 'OrderService', label: 'new OrderService(repository, policy)', note: '먼저 만든 두 빈을 생성자 인자로 전달' },
+    { from: 'OrderService', to: 'RateDiscountPolicy', label: 'discount(price)', note: '이후 요청 처리 시 주입받은 객체를 그대로 사용' },
+  ]}
+/>
+
+## 코드 예시
+
+### 인터페이스와 구현
+
+```java
+public interface DiscountPolicy {
+    long discount(long price);
+}
+
+@Component
+public class FixedDiscountPolicy implements DiscountPolicy {
+    @Override
+    public long discount(long price) {
+        return 1_000;
+    }
+}
+
+@Component
+@Primary // DiscountPolicy 빈이 여러 개일 때 기본으로 주입된다
+public class RateDiscountPolicy implements DiscountPolicy {
+    @Override
+    public long discount(long price) {
+        return price * 10 / 100;
+    }
+}
+```
+
+### 생성자 주입
+
+```java
+@Service
+public class OrderService {
+
+    private final OrderRepository orderRepository;
+    private final DiscountPolicy discountPolicy;
+
+    // 생성자가 하나뿐이므로 @Autowired를 생략할 수 있다
+    public OrderService(OrderRepository orderRepository, DiscountPolicy discountPolicy) {
+        this.orderRepository = orderRepository;
+        this.discountPolicy = discountPolicy;
+    }
+
+    public Order place(Long memberId, long price) {
+        long finalPrice = price - discountPolicy.discount(price);
+        return orderRepository.save(new Order(memberId, finalPrice));
+    }
+}
+```
+
+특정 구현을 콕 집어 받고 싶다면 `@Qualifier`를 쓴다. 이때 빈 이름은 기본적으로 클래스 이름의 첫 글자를 소문자로 바꾼 것이다.
+
+```java
+public OrderService(OrderRepository orderRepository,
+                    @Qualifier("fixedDiscountPolicy") DiscountPolicy discountPolicy) {
+    this.orderRepository = orderRepository;
+    this.discountPolicy = discountPolicy;
+}
+```
+
+### `@Configuration`과 `@Bean`
+
+```java
+@Configuration
+public class TimeConfig {
+
+    // java.time.Clock은 JDK 클래스라 @Component를 붙일 수 없으므로 @Bean으로 등록한다
+    @Bean
+    public Clock clock() {
+        return Clock.systemDefaultZone();
+    }
+}
+```
+
+### 컨테이너 없이 테스트하기
+
+생성자 주입을 쓰면 테스트에서 Spring을 띄우지 않고 직접 가짜 객체를 넣을 수 있다.
+
+```java
+class OrderServiceTest {
+
+    @Test
+    void 할인된_가격으로_주문한다() {
+        OrderRepository fakeRepository = new InMemoryOrderRepository();
+        DiscountPolicy noDiscount = price -> 0;
+
+        OrderService service = new OrderService(fakeRepository, noDiscount);
+
+        Order order = service.place(1L, 10_000);
+        assertEquals(10_000, order.getPrice());
+    }
+}
+```
+
+## 언제 사용해야 할까?
+
+Spring 애플리케이션에서는 대부분의 서비스·저장소·컨트롤러를 빈으로 등록해 DI로 연결한다. 판단이 필요한 것은 "어떻게" 등록하고 주입하느냐다.
+
+| 상황 | 권장 방법 |
+| --- | --- |
+| 직접 작성한 서비스, 저장소, 컨트롤러 | `@Service`, `@Repository`, `@RestController` 등 + 컴포넌트 스캔 |
+| 외부 라이브러리 객체, 생성 로직이 복잡한 객체 | `@Configuration` 클래스의 `@Bean` 메서드 |
+| 반드시 필요한 의존성 | 생성자 주입, 필드는 `final` |
+| 없어도 동작하는 선택적 의존성 | 세터 주입 또는 `ObjectProvider` |
+| 같은 타입 구현이 여러 개 | 기본값은 `@Primary`, 특정 구현이 필요한 곳은 `@Qualifier` |
+| 엔티티, DTO, 값 객체 | 빈으로 만들지 않는다. 요청마다 생기는 데이터는 `new`로 만든다 |
+
+모든 것을 빈으로 만들 필요는 없다. **상태 없이 여러 곳에서 재사용되는 협력 객체**가 빈의 주요 대상이다.
+
+## 주의 사항과 흔한 오해
+
+- **"DI는 Spring 기능이다"** — DI는 설계 원칙이다. 생성자로 의존성을 넘겨받기만 해도 DI이며, 위의 테스트 코드처럼 프레임워크 없이도 할 수 있다. Spring은 이 연결 작업을 대신 해 주는 컨테이너를 제공할 뿐이다.
+- **"`@Autowired`를 붙여야 주입된다"** — 생성자가 하나뿐이면 생략해도 된다. 반대로 `new OrderService(...)`로 직접 만든 객체는 컨테이너가 관리하지 않으므로, 그 안의 `@Autowired` 필드는 채워지지 않는다.
+- **"싱글톤 빈이면 스레드 안전하다"** — 컨테이너는 인스턴스를 하나만 만들 뿐 동시성을 보장하지 않는다. 필드에 요청별 데이터(사용자 정보, 계산 중간값 등)를 저장하면 다른 요청과 섞인다. 상태는 지역 변수나 파라미터로 다루자.
+- **순환 참조**: A가 생성자로 B를, B가 생성자로 A를 요구하면 어느 쪽도 먼저 만들 수 없어 `BeanCurrentlyInCreationException`이 발생한다. 세터 주입으로 우회할 수는 있지만 레퍼런스도 권장하지 않는다. Spring Boot는 2.6부터 순환 참조를 기본으로 허용하지 않는다. 대부분 책임을 다시 나누거나 공통 로직을 별도 빈으로 빼서 해결하는 것이 맞다.
+- **"인터페이스를 반드시 만들어야 한다"** — 구현이 하나뿐이고 바꿀 계획이 없다면 클래스를 그대로 주입해도 된다. 인터페이스는 실제로 구현을 교체하거나 경계를 나눌 필요가 있을 때 추가해도 늦지 않다.
+- **주입된 객체가 원본이라고 가정하지 말자.** `@Transactional` 등이 붙은 빈은 프록시가 주입된다. 같은 클래스 안에서 `this.method()`로 호출하면 프록시를 거치지 않아 부가 기능이 동작하지 않는데, 자세한 내용은 Spring 트랜잭션 개념에서 다룬다.
+- **`@PostConstruct`에서 프록시 기능에 기대지 말자.** 초기화 콜백 시점에는 프록시가 아직 완성되지 않았을 수 있어서, 예를 들어 트랜잭션이 적용되지 않을 수 있다.

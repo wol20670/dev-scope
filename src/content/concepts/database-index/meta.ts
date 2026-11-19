@@ -1,0 +1,67 @@
+import type { ConceptMeta } from '../../../types/concept'
+
+export default {
+  id: 'database-index',
+  slug: 'database-index',
+  title: '데이터베이스 인덱스',
+  description:
+    '테이블 전체를 훑지 않고 원하는 행을 빠르게 찾기 위해, 컬럼 값을 정렬된 구조(주로 B-tree)로 따로 관리하는 자료구조. 읽기를 빠르게 하는 대신 쓰기와 저장 공간 비용을 치른다.',
+  category: 'database-infra',
+  tags: ['SQL', '성능', '인덱스'],
+  aliases: ['Database Index', 'DB 인덱스', 'Index', 'B-tree Index', 'B-Tree 인덱스', '색인'],
+  keywords: [
+    'B-tree',
+    'Full Table Scan',
+    'Seq Scan',
+    'Index Scan',
+    'Index-Only Scan',
+    '복합 인덱스',
+    'Composite Index',
+    'Leftmost Prefix',
+    '커버링 인덱스',
+    'Covering Index',
+    'INCLUDE',
+    '선택도',
+    'Selectivity',
+    'Cardinality',
+    'EXPLAIN',
+    'EXPLAIN ANALYZE',
+    '실행 계획',
+    '옵티마이저',
+    'Skip Scan',
+  ],
+  difficulty: 'intermediate',
+  prerequisites: [],
+  relatedConcepts: ['jpa-n-plus-one', 'optimistic-pessimistic-lock', 'spring-transaction'],
+  visualizationType: 'static',
+  keyPoints: [
+    '인덱스는 컬럼 값을 정렬된 B-tree로 유지해, 전체 테이블 스캔 대신 트리를 몇 단계 내려가는 것만으로 원하는 행을 찾게 해 준다.',
+    '복합 인덱스는 선두(가장 왼쪽) 컬럼부터 정렬되므로, 선두 컬럼에 조건이 있을 때 가장 효율적이다(Leftmost Prefix).',
+    '쿼리에 필요한 컬럼이 모두 인덱스에 있으면 테이블을 읽지 않고 인덱스만으로 응답할 수 있다(커버링 인덱스).',
+    '인덱스는 INSERT·UPDATE·DELETE 때마다 함께 갱신되어야 하므로 쓰기 비용과 저장 공간을 늘린다.',
+    '인덱스 사용 여부는 옵티마이저가 비용으로 결정하며, EXPLAIN으로 실제 실행 계획을 확인해야 한다. 컬럼에 함수 적용·앞쪽 와일드카드 LIKE·타입 변환은 인덱스 사용을 막을 수 있다(DBMS에 따라 다름).',
+  ],
+  references: [
+    {
+      title: 'Chapter 11. Indexes',
+      url: 'https://www.postgresql.org/docs/current/indexes.html',
+      publisher: 'PostgreSQL Docs',
+    },
+    {
+      title: 'Using EXPLAIN',
+      url: 'https://www.postgresql.org/docs/current/using-explain.html',
+      publisher: 'PostgreSQL Docs',
+    },
+    {
+      title: 'How MySQL Uses Indexes',
+      url: 'https://dev.mysql.com/doc/refman/8.4/en/mysql-indexes.html',
+      publisher: 'MySQL 8.4 Reference Manual',
+    },
+    {
+      title: 'Multiple-Column Indexes',
+      url: 'https://dev.mysql.com/doc/refman/8.4/en/multiple-column-indexes.html',
+      publisher: 'MySQL 8.4 Reference Manual',
+    },
+  ],
+  updatedAt: '2026-11-19',
+} satisfies ConceptMeta

@@ -1,0 +1,175 @@
+## 왜 필요한가?
+
+트랜잭션은 ACID 성질을 가진다. 그중 **I(Isolation, 격리성)** 는 "동시에 실행되는 트랜잭션이 서로 간섭하지 않는 것처럼 보이게 한다"는 약속이다.
+
+가장 확실한 방법은 트랜잭션을 하나씩 차례로 실행하는 것이다. 하지만 그러면 요청 수천 개가 줄을 서야 한다. 그래서 데이터베이스는 트랜잭션을 동시에 실행하면서, **어느 정도의 간섭까지 허용할지**를 선택하게 해 준다. 이 선택지가 격리 수준이다.
+
+격리 수준이 낮으면 동시에 많이 처리할 수 있지만, 이런 일이 생길 수 있다.
+
+- 정산 배치가 아직 확정되지 않은 금액을 읽어 리포트를 만들었는데, 그 금액이 롤백되었다.
+- 한 트랜잭션 안에서 주문 금액 합계를 두 번 계산했더니 서로 다른 값이 나왔다.
+- "재고 10개 미만 상품" 목록을 두 번 조회하는 사이에 행이 늘어났다.
+
+어떤 격리 수준이 무엇을 막아 주는지 알아야 "이 버그가 왜 생겼는지", "격리 수준을 올려야 하는지 락을 써야 하는지"를 판단할 수 있다.
+
+## 쉽게 이해하는 비유
+
+여러 사람이 같은 **화이트보드**를 함께 쓰는 회의실을 떠올려 보자.
+
+- **READ UNCOMMITTED**: 다른 사람이 쓰는 중인 글씨까지 그대로 본다. 그 사람이 곧 지울 내용일 수도 있다.
+- **READ COMMITTED**: "확정" 도장이 찍힌 내용만 본다. 다만 볼 때마다 최신 확정본을 보므로, 잠깐 사이에 내용이 바뀌어 있을 수 있다.
+- **REPEATABLE READ**: 회의를 시작할 때 화이트보드 사진을 한 장 찍어 두고, 회의가 끝날 때까지 그 사진만 본다.
+- **SERIALIZABLE**: 결과적으로 한 사람씩 차례로 화이트보드를 쓴 것과 같아지도록 보장한다. 그렇게 보장할 수 없으면 누군가에게 "다시 해 주세요"라고 하거나(PostgreSQL), 다른 사람이 끝날 때까지 기다리게 한다(MySQL InnoDB).
+
+비유의 한계도 있다. 실제 DBMS는 사진(스냅샷)을 찍는 시점과 범위, 기다리게 하는 대상이 구현마다 다르다. 아래 동작 원리에서 정확히 보자.
+
+## 동작 원리
+
+### 세 가지 읽기 이상 현상
+
+| 현상 | 상황 | 문제 |
+| --- | --- | --- |
+| **Dirty Read** | T2가 커밋하지 않은 변경을 T1이 읽는다 | T2가 롤백하면 T1은 존재한 적 없는 값을 사용한 셈이다 |
+| **Non-repeatable Read** | T1이 같은 행을 두 번 읽는 사이에 T2가 수정하고 커밋한다 | 같은 트랜잭션 안에서 같은 행의 값이 달라진다 |
+| **Phantom Read** | T1이 같은 조건으로 두 번 조회하는 사이에 T2가 조건에 맞는 행을 추가하고 커밋한다 | 결과 행의 집합이 달라진다 |
+
+PostgreSQL 문서는 여기에 **직렬화 이상(Serialization Anomaly)** 을 하나 더 든다. 각 트랜잭션은 따로 보면 문제가 없는데, 여러 트랜잭션을 함께 커밋한 결과가 어떤 순서로 하나씩 실행해도 나올 수 없는 상태가 되는 경우다.
+
+### SQL 표준의 정의
+
+SQL 표준은 격리 수준마다 **허용되는 현상**을 정한다. "반드시 발생한다"가 아니라 "발생해도 표준 위반이 아니다"라는 뜻이다.
+
+| 격리 수준 | Dirty Read | Non-repeatable Read | Phantom Read |
+| --- | --- | --- | --- |
+| READ UNCOMMITTED | 허용 | 허용 | 허용 |
+| READ COMMITTED | 방지 | 허용 | 허용 |
+| REPEATABLE READ | 방지 | 방지 | 허용 |
+| SERIALIZABLE | 방지 | 방지 | 방지 |
+
+DBMS는 표준보다 **더 엄격하게** 구현할 수 있다. 그래서 같은 격리 수준이라도 DBMS마다 결과가 다르다.
+
+### 막는 방법: 스냅샷(MVCC)과 잠금
+
+- **MVCC(다중 버전 동시성 제어)**: 행을 수정해도 이전 버전을 남겨 둔다. 읽는 쪽은 자신의 **스냅샷** 시점에 커밋되어 있던 버전을 읽으므로, 쓰는 쪽을 기다리지 않는다.
+- **잠금 기반**: 읽을 때 공유 잠금을 걸어 다른 트랜잭션의 수정·삽입을 기다리게 한다. 결과는 일관되지만 대기가 생긴다.
+
+### PostgreSQL
+
+- **기본값: READ COMMITTED.**
+- **READ UNCOMMITTED**는 READ COMMITTED와 똑같이 동작한다. PostgreSQL에서는 Dirty Read가 일어나지 않는다.
+- **READ COMMITTED**: 각 SELECT 문은 그 문장이 시작된 시점까지 커밋된 데이터만 본다.
+- **REPEATABLE READ**: 트랜잭션의 첫 문장 시점의 스냅샷을 끝까지 본다. 표준은 이 수준에서 Phantom Read를 허용하지만 PostgreSQL에서는 일어나지 않는다. 다른 트랜잭션이 먼저 수정하고 커밋한 행을 수정하려 하면 `could not serialize access due to concurrent update` 오류로 롤백된다.
+- **SERIALIZABLE**: REPEATABLE READ에 더해, 직렬화 이상이 생길 수 있는 의존 관계를 감지하면 한 트랜잭션을 실패시킨다. 이때 SQLSTATE는 `40001`이며, 애플리케이션이 **재시도**해야 한다.
+
+### MySQL InnoDB
+
+- **기본값: REPEATABLE READ.**
+- **READ UNCOMMITTED**: 잠금 없이 읽으며, 커밋되지 않은 값을 읽을 수 있다(Dirty Read).
+- **READ COMMITTED**: 일관된 읽기(일반 SELECT)를 할 때마다 새 스냅샷을 만든다. 갭 잠금을 쓰지 않으므로 Phantom이 생길 수 있다.
+- **REPEATABLE READ**: 일반 SELECT는 트랜잭션의 **첫 읽기** 시점 스냅샷을 계속 읽는다. 잠금 읽기(`FOR UPDATE`, `FOR SHARE`)나 범위 조건의 UPDATE·DELETE는 next-key 잠금이나 갭 잠금으로 범위에 대한 삽입을 막는다.
+- **SERIALIZABLE**: REPEATABLE READ와 같지만, autocommit이 꺼진 트랜잭션에서는 일반 SELECT를 `SELECT ... FOR SHARE`로 바꾼다. 그래서 이상 현상을 **잠금 대기**로 막는다.
+
+<Callout type="warn" title="스냅샷은 SELECT에만 적용된다 (MySQL)">
+MySQL 문서에 따르면 REPEATABLE READ의 스냅샷은 SELECT에 적용되며, UPDATE·DELETE에는 꼭 적용되지 않는다. 다른 트랜잭션이 방금 커밋한 행은 SELECT로는 보이지 않아도 UPDATE의 대상이 될 수 있다. 수정한 뒤에는 그 행이 현재 트랜잭션에서 보이게 된다.
+</Callout>
+
+## 시각화
+
+이상 현상을 고르고, 격리 수준과 DBMS를 바꿔 가며 실행해 보자. 같은 SQL이라도 조합에 따라 **이상 현상이 생기는지**, 막는다면 **스냅샷으로 막는지 잠금 대기로 막는지**가 달라진다. 결과를 먼저 예상해 본 다음 비교표를 열어 확인해 보자.
+
+<Simulator />
+
+## 코드 예시
+
+### SQL로 격리 수준 지정
+
+```sql
+-- PostgreSQL: 트랜잭션 시작과 함께 지정
+BEGIN ISOLATION LEVEL REPEATABLE READ;
+SELECT price FROM product WHERE id = 1;
+-- ...
+COMMIT;
+
+-- 현재 세션의 기본값 확인
+SHOW default_transaction_isolation;
+```
+
+```sql
+-- MySQL: 다음 트랜잭션 하나에만 적용
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+START TRANSACTION;
+SELECT price FROM product WHERE id = 1;
+-- ...
+COMMIT;
+
+-- 현재 세션 값 확인
+SELECT @@transaction_isolation;
+```
+
+### Spring에서 지정
+
+```java
+@Service
+public class ReportService {
+    private final OrderRepository orderRepository;
+
+    public ReportService(OrderRepository orderRepository) {
+        this.orderRepository = orderRepository;
+    }
+
+    // 한 트랜잭션 안에서 여러 번 집계해도 같은 스냅샷을 보도록 한다
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public DailyReport createDailyReport(LocalDate date) {
+        long count = orderRepository.countByOrderDate(date);
+        // @Query("select coalesce(sum(o.amount), 0) from Order o where o.orderDate = :date")로 정의한 메서드
+        long total = orderRepository.sumAmountByOrderDate(date);
+        return new DailyReport(date, count, total);
+    }
+}
+```
+
+- `Isolation.DEFAULT`(기본값)는 Spring이 격리 수준을 따로 설정하지 않고 데이터베이스의 기본값을 쓴다는 뜻이다.
+- JPA 표준 자체는 트랜잭션별 격리 수준 지정을 다루지 않는다. Spring의 `JpaTransactionManager`는 벤더별 `JpaDialect`(Spring Boot + Hibernate라면 `HibernateJpaDialect`)를 통해 이를 지원한다. 설정이 실제로 적용되는지는 DB 로그나 `@@transaction_isolation` 등으로 확인해 보자.
+
+### SERIALIZABLE은 재시도와 함께
+
+```java
+public void placeOrder(OrderCommand command) {
+    for (int attempt = 1; ; attempt++) {
+        try {
+            orderService.placeOrder(command); // @Transactional(isolation = Isolation.SERIALIZABLE)
+            return;
+        } catch (ConcurrencyFailureException e) {
+            // PostgreSQL의 직렬화 실패(SQLSTATE 40001)는 보통 이 계열 예외로 변환된다.
+            // 구체적인 타입은 Spring 버전과 예외 변환 설정에 따라 다르다.
+            if (attempt == 3) throw e;
+        }
+    }
+}
+```
+
+재시도 루프는 **트랜잭션 바깥**에 둔다. 실패한 트랜잭션은 이미 롤백되었으므로, 새 트랜잭션에서 처음부터 다시 실행해야 한다.
+
+## 언제 사용해야 할까?
+
+| 격리 수준 | 이럴 때 고려 | 주의 |
+| --- | --- | --- |
+| READ UNCOMMITTED | 거의 쓰지 않는다. 대략적인 통계처럼 부정확해도 되는 조회 | 롤백될 값을 읽을 수 있다 (MySQL) |
+| READ COMMITTED | 대부분의 OLTP 서비스. PostgreSQL의 기본값 | 한 트랜잭션 안에서 같은 조회 결과가 달라질 수 있다 |
+| REPEATABLE READ | 한 트랜잭션 안에서 여러 번 조회한 결과가 서로 일관되어야 하는 리포트·정산. MySQL의 기본값 | PostgreSQL에서는 동시 수정 시 직렬화 오류와 재시도가 필요하다 |
+| SERIALIZABLE | 여러 행에 걸친 규칙(불변식)이 반드시 지켜져야 하는 경우 | 재시도(PostgreSQL)나 잠금 대기·교착 상태(MySQL)를 감수해야 한다 |
+
+판단 순서:
+
+1. 먼저 **DB 기본값으로 충분한지** 본다. 대부분은 기본값과 올바른 쿼리 설계로 해결된다.
+2. 특정 행의 동시 수정이 문제라면, 격리 수준을 높이기보다 [낙관적·비관적 락](/concepts/optimistic-pessimistic-lock)이나 원자적 UPDATE를 먼저 검토한다.
+3. 여러 행에 걸친 규칙을 지켜야 해서 SERIALIZABLE이 필요하다면, **재시도 로직을 함께** 만든다.
+
+## 주의 사항과 흔한 오해
+
+- **"격리 수준을 올리면 동시성 문제가 모두 해결된다"** — 읽기 이상 현상을 줄일 뿐이다. 예를 들어 READ COMMITTED에서 "읽고 → 계산하고 → 쓰는" 갱신 손실은 그대로 생길 수 있다. 락, 원자적 UPDATE, 버전 컬럼 같은 쓰기 쪽 대책이 따로 필요하다.
+- **"REPEATABLE READ에서는 Phantom Read가 생긴다"** — SQL 표준이 허용한다는 뜻일 뿐이다. PostgreSQL에서는 일어나지 않고, MySQL InnoDB도 일반 SELECT는 스냅샷을 읽으므로 보이지 않는다. 반대로 MySQL에서 잠금 읽기(`FOR UPDATE`)를 쓰면 스냅샷이 아니라 최신 커밋 데이터를 읽는다.
+- **"SERIALIZABLE이면 트랜잭션이 정말 하나씩 실행된다"** — 그렇지 않다. 결과가 어떤 순서로 하나씩 실행한 것과 같도록 보장할 뿐이다. PostgreSQL은 동시에 실행한 뒤 문제가 될 트랜잭션을 실패시키고, MySQL InnoDB는 잠금으로 대기시킨다.
+- **"스냅샷을 읽으니 항상 최신 데이터다"** — 반대다. REPEATABLE READ의 스냅샷은 시간이 지날수록 오래된 데이터가 된다. 트랜잭션을 길게 유지하면 오래된 값으로 판단할 수 있고, MVCC가 지울 수 없는 옛 버전도 쌓인다.
+- **`@Transactional(isolation = ...)`은 새 트랜잭션을 시작할 때만 적용된다.** 이미 진행 중인 트랜잭션에 참여하는 메서드(기본 전파 `REQUIRED`)에 붙인 격리 수준은 기본 설정에서 무시된다. 바깥 트랜잭션의 설정을 따른다.
+- **DB 기본값은 환경마다 다를 수 있다.** 서버 설정, 커넥션 풀 설정, 드라이버 옵션으로 바뀔 수 있으니 실제 값을 확인하자.

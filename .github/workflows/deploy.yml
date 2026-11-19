@@ -1,0 +1,51 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 동시에 여러 배포가 돌지 않게 하되, 진행 중인 배포는 끝까지 마친다
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - id: pages
+        uses: actions/configure-pages@v6
+      - name: Build
+        run: npm run build
+        env:
+          # 저장소 이름 하위 경로(/<repo>/)에 맞춰 빌드
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}/
+      # SPA 직접 URL 접근: 없는 경로는 404.html(= 앱)로 응답된다 (HTTP 상태는 404)
+      - run: cp dist/index.html dist/404.html
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

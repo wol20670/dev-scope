@@ -1,0 +1,221 @@
+## 왜 필요한가?
+
+React를 쓰다 보면 이런 질문을 자주 만난다.
+
+- 버튼 하나 눌렀을 뿐인데 왜 콘솔에 여러 컴포넌트의 로그가 찍힐까?
+- "리렌더링이 많으면 느리다"는데, 리렌더링될 때마다 DOM을 전부 다시 만드는 걸까?
+- `setCount(count + 1)` 직후에 `count`를 출력하면 왜 이전 값이 나올까?
+- `memo`는 언제 효과가 있고, 언제 소용이 없을까?
+
+이 질문들은 모두 **React가 화면을 갱신하는 과정**을 알면 풀린다. 특히 "리렌더링 = DOM 변경"이라는 오해를 그대로 두면, 필요 없는 최적화에 시간을 쓰거나 정작 느린 원인을 놓친다.
+
+## 쉽게 이해하는 비유
+
+react.dev는 이 과정을 **식당**에 빗댄다.
+
+1. **트리거**: 손님이 주문한다(처음 방문했거나, 추가 주문을 했다).
+2. **렌더**: 주방(React)이 주문서를 보고 요리를 만든다. 컴포넌트 함수를 호출해 "화면이 어떻게 생겨야 하는지"를 계산하는 단계다.
+3. **커밋**: 완성된 요리를 테이블(DOM)에 올린다. 이미 테이블에 있는 요리와 같다면 그대로 두고, 달라진 접시만 바꾼다.
+
+그 뒤 손님이 테이블을 보는 것이 **브라우저의 페인트**다.
+
+비유에서 놓치기 쉬운 점은, 주방이 요리를 다시 만들었다고(렌더) 해서 테이블의 접시가 반드시 바뀌는(커밋 시 DOM 변경) 것은 아니라는 것이다.
+
+## 동작 원리
+
+<Flow
+  title="React가 화면을 갱신하는 순서"
+  steps={[
+    { title: '트리거', detail: '초기 렌더(root.render) 또는 state 변경(set 함수 호출)' },
+    { title: '렌더 단계', detail: '컴포넌트 함수를 호출해 새 JSX를 계산하고, 이전 결과와 비교한다' },
+    { title: '커밋 단계', detail: '달라진 부분만 실제 DOM에 반영한다' },
+    { title: '브라우저 페인트', detail: 'React가 아니라 브라우저가 바뀐 DOM을 화면에 그린다' },
+  ]}
+/>
+
+### 1단계: 트리거
+
+렌더링이 시작되는 이유는 두 가지다.
+
+- **초기 렌더**: `createRoot(domNode).render(<App />)`를 호출할 때
+- **state 변경**: 컴포넌트(또는 그 조상)의 state가 set 함수로 바뀔 때
+
+set 함수는 state 변수를 그 자리에서 바꾸지 않는다. **다음 렌더를 요청(큐에 등록)** 할 뿐이다. 또 React는 한 이벤트 핸들러 안에서 여러 번 호출된 set 함수를 모아(**배칭**) 핸들러가 모두 끝난 뒤 한 번만 다시 렌더링한다.
+
+### 2단계: 렌더 — 컴포넌트를 호출한다
+
+**렌더링이란 React가 컴포넌트 함수를 호출하는 것**이다.
+
+- 초기 렌더에서는 루트 컴포넌트부터 호출한다.
+- 이후 렌더에서는 **state 변경을 일으킨 컴포넌트**부터 호출한다.
+- 호출한 컴포넌트가 반환한 JSX에 다른 컴포넌트가 있으면 그것도 호출한다. 이 과정은 더 이상 호출할 컴포넌트가 없을 때까지 재귀적으로 이어진다.
+
+그래서 **부모가 리렌더링되면 자식도 기본적으로 다시 호출된다.** 자식의 props가 바뀌었는지는 상관없다. 리렌더링 중에 React는 새 결과를 이전 렌더 결과와 비교해, 커밋 단계에서 DOM에 무엇을 바꿔야 하는지 계산한다.
+
+렌더 단계는 **순수한 계산**이어야 한다. 같은 입력(props, state, context)이면 같은 JSX를 반환하고, 렌더 중에 DOM을 건드리거나 외부 변수를 바꾸면 안 된다. 개발 환경의 Strict Mode는 이런 실수를 찾도록 컴포넌트 함수를 **두 번** 호출한다.
+
+### 렌더 시점의 state는 스냅샷이다
+
+컴포넌트가 호출될 때 React는 **그 렌더 시점의 state 값**을 넘겨준다. 이벤트 핸들러도 그 렌더에서 만들어진 함수이므로 그 값을 그대로 본다.
+
+```tsx
+function Counter() {
+  const [count, setCount] = useState(0)
+
+  function handleClick() {
+    setCount(count + 1)
+    console.log(count) // 0 — 이 렌더의 count는 여전히 0이다
+  }
+
+  return <button onClick={handleClick}>{count}</button>
+}
+```
+
+`setCount`는 "다음 렌더에서 count는 1"이라고 요청할 뿐, 이미 실행 중인 함수의 `count` 변수를 바꾸지 않는다.
+
+### 같은 값으로 set하면?
+
+set 함수에 넘긴 값이 현재 state와 `Object.is` 기준으로 같으면, React는 **그 컴포넌트와 자식의 리렌더링을 건너뛴다.** 다만 react.dev의 `useState` 문서는 경우에 따라 React가 자식을 건너뛰기 전에 **해당 컴포넌트를 한 번 호출할 수도 있다**고 설명한다. 이 호출 결과는 버려지므로 코드 동작에는 영향을 주지 않는다.
+
+객체나 배열을 직접 수정한 뒤 같은 참조를 넘기면 `Object.is`가 `true`가 되어 화면이 바뀌지 않는다. 항상 **새 객체**를 만들어 넘겨야 하는 이유다.
+
+### memo: props가 같으면 건너뛰기
+
+`memo`로 감싼 컴포넌트는 부모가 리렌더링되어도 **새 props가 이전 props와 모두 같으면** 리렌더링을 건너뛸 수 있다. 비교는 각 prop을 `Object.is`로 비교하는 얕은 비교다.
+
+- `Object.is(3, 3)`은 `true`지만 `Object.is({}, {})`는 `false`다. 부모가 렌더링할 때마다 새로 만드는 객체·배열·함수를 props로 넘기면 `memo`는 매번 "props가 바뀌었다"고 판단한다.
+- `memo`는 **부모에게서 받는 props**에 대한 최적화일 뿐이다. 컴포넌트 **자신의 state**나 사용 중인 **context**가 바뀌면 여전히 리렌더링된다.
+- react.dev는 `memo`를 "보장이 아닌 성능 최적화"라고 설명한다. `memo` 없이는 동작하지 않는 코드라면 다른 문제가 있는 것이다.
+
+### 3단계: 커밋 — 달라진 DOM만 바꾼다
+
+렌더가 끝나면 React는 결과를 DOM에 반영한다.
+
+- **초기 렌더**: 만든 DOM 노드를 화면에 추가한다(`appendChild`).
+- **리렌더**: 렌더 중에 계산한 **최소한의 변경**만 적용한다.
+
+즉 **React는 렌더 결과가 이전과 다를 때만 DOM 노드를 바꾼다.** 컴포넌트 10개가 리렌더링되었어도 실제로 바뀐 텍스트가 하나뿐이라면 DOM 변경도 그 하나뿐이다. 입력창에 사용자가 입력 중인 값처럼 같은 위치의 같은 DOM 노드에 있는 상태도 그대로 유지된다.
+
+### 4단계: 브라우저 페인트
+
+React가 DOM을 갱신하고 나면 **브라우저가** 화면을 다시 그린다. react.dev는 이를 React의 "렌더링"과 구분하려고 **페인트(painting)** 라고 부른다. 이 시점은 React가 아니라 브라우저의 이벤트 루프가 정한다.
+
+## 시각화
+
+아래 컴포넌트 트리에서 동작을 하나씩 실행해 보자. `App`은 `theme` state를, `Counter`는 `count` state를 가지고 있고, `Sidebar`는 `memo`를 켜고 끌 수 있다.
+
+- `setCount(+1)`: `Counter`부터 렌더링이 시작된다. 위쪽의 `App`, 옆의 `Header`·`Sidebar`는 호출되지 않는다.
+- `setCount(같은 값)`: 값이 같으므로 렌더링이 건너뛰어진다.
+- 테마 전환: `App`부터 렌더링되므로 그 아래 모든 컴포넌트가 다시 호출된다. 단, `memo`를 켠 `Sidebar`는 props가 같으면 건너뛴다.
+
+각 단계에서 **렌더 단계에서 호출된 컴포넌트**와 **커밋 단계에서 실제로 바뀐 DOM 노드**의 수를 비교해 보자.
+
+<Simulator />
+
+<Callout type="info" title="시뮬레이터가 단순화한 부분">
+시뮬레이터는 트리거 → 렌더 → 커밋 → 페인트의 흐름과 "어떤 컴포넌트가 호출되고 어떤 DOM이 바뀌는가"만 보여 준다. 같은 값으로 set할 때 컴포넌트가 한 번 호출될 수 있는 경우, Strict Mode의 이중 호출, 동시성 렌더링(렌더 중단·재시작), Effect 실행 시점은 표현하지 않는다.
+</Callout>
+
+## 코드 예시
+
+시뮬레이터의 트리를 실제 코드로 옮기면 다음과 같다. 각 컴포넌트에 `console.log`를 넣어 실행해 보면 어떤 컴포넌트가 다시 호출되는지 직접 확인할 수 있다.
+
+```tsx
+import { memo, useState } from 'react'
+
+export default function App() {
+  const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  console.log('render: App')
+
+  return (
+    <div className={theme}>
+      <Header theme={theme} />
+      <button onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>테마 전환</button>
+      <Counter />
+      <Sidebar />
+    </div>
+  )
+}
+
+function Header({ theme }: { theme: string }) {
+  console.log('render: Header')
+  return <h1>현재 테마: {theme}</h1>
+}
+
+function Counter() {
+  const [count, setCount] = useState(0)
+  console.log('render: Counter')
+
+  return (
+    <section>
+      <CountLabel count={count} />
+      <IncrementButton onClick={() => setCount(count + 1)} />
+      {/* 같은 값으로 set → 리렌더링을 건너뛴다 */}
+      <button onClick={() => setCount(count)}>같은 값으로 set</button>
+    </section>
+  )
+}
+
+function CountLabel({ count }: { count: number }) {
+  console.log('render: CountLabel')
+  return <p>count: {count}</p>
+}
+
+function IncrementButton({ onClick }: { onClick: () => void }) {
+  console.log('render: IncrementButton')
+  return <button onClick={onClick}>+1</button>
+}
+
+// props가 없으므로, App이 리렌더링되어도 Sidebar는 건너뛸 수 있다
+const Sidebar = memo(function Sidebar() {
+  console.log('render: Sidebar')
+  return (
+    <aside>
+      <SidebarItem />
+    </aside>
+  )
+})
+
+function SidebarItem() {
+  console.log('render: SidebarItem')
+  return <a href="/settings">설정</a>
+}
+```
+
+- +1 버튼을 누르면 `Counter`, `CountLabel`, `IncrementButton`의 로그가 찍힌다. 하지만 DOM에서 바뀌는 것은 `count:` 뒤의 텍스트뿐이다. `IncrementButton`은 호출되었지만 버튼의 텍스트와 속성이 이전과 같으므로 버튼 DOM 노드에는 바뀔 것이 없다.
+- 테마 전환을 누르면 `App` 아래 모든 컴포넌트가 호출되지만 `Sidebar`와 `SidebarItem`은 건너뛴다. `memo`를 지우면 둘 다 호출된다.
+
+### memo를 무력화하는 props
+
+```tsx
+// 렌더링할 때마다 새 객체·새 함수가 만들어지므로 memo의 얕은 비교가 항상 실패한다
+<Sidebar style={{ width: 200 }} onSelect={() => console.log('select')} />
+```
+
+이런 경우 객체를 컴포넌트 밖으로 빼거나, 부모에서 `useMemo`/`useCallback`으로 같은 참조를 유지해야 `memo`가 의미를 가진다.
+
+## 언제 사용해야 할까?
+
+리렌더링 자체는 React의 정상 동작이다. 대부분은 빠르므로 **측정하고 나서** 최적화한다.
+
+| 상황 | 접근 |
+| --- | --- |
+| 리렌더링되지만 화면도 빠르게 반응한다 | 그대로 둔다 |
+| 렌더링 비용이 큰 컴포넌트가 같은 props로 자주 리렌더링된다 | `memo`, 필요하면 `useMemo`/`useCallback`으로 props 참조 유지 |
+| state를 쓰는 곳은 일부인데 상위 컴포넌트에 있다 | state를 사용하는 컴포넌트 가까이로 **내린다** |
+| 감싸는 컴포넌트의 state 때문에 내부 콘텐츠가 함께 리렌더링된다 | 내부 콘텐츠를 `children`으로 받아 전달한다 |
+| 어떤 컴포넌트가 왜 렌더링되는지 모르겠다 | React Developer Tools의 Profiler로 측정한다 |
+
+<Callout type="tip" title="React Compiler">
+React Compiler는 빌드 시점에 `memo`, `useMemo`, `useCallback`에 해당하는 메모이제이션을 자동으로 적용하는 도구다. react.dev는 컴파일러를 쓰면 대개 `React.memo`를 직접 쓸 필요가 없다고 설명한다. 다만 프로젝트에 별도로 설정해야 하는 선택 사항이고, 코드가 React의 규칙(렌더 순수성 등)을 따를 때 제대로 동작한다. 컴파일러를 쓰더라도 위의 렌더·커밋 원리는 그대로다.
+</Callout>
+
+## 주의 사항과 흔한 오해
+
+- **"리렌더링되면 DOM이 다시 만들어진다"** — 리렌더링은 컴포넌트 함수 호출이다. DOM은 커밋 단계에서 이전 결과와 다른 부분만 바뀐다.
+- **"props가 바뀌어야 자식이 리렌더링된다"** — 기본 동작은 반대다. 부모가 리렌더링되면 자식은 props와 상관없이 다시 호출된다. props 비교로 건너뛰는 것은 `memo`를 썼을 때의 동작이다.
+- **"memo를 쓰면 절대 리렌더링되지 않는다"** — 자신의 state나 사용하는 context가 바뀌면 리렌더링된다. 새로 만든 객체·함수를 props로 받으면 매번 리렌더링된다. 그리고 `memo`는 보장이 아닌 최적화다.
+- **"setCount 직후 count에 새 값이 들어 있다"** — state는 렌더 시점의 스냅샷이다. 새 값은 다음 렌더에서 보인다. 이전 값을 기준으로 여러 번 갱신하려면 `setCount(c => c + 1)`처럼 업데이터 함수를 쓴다.
+- **"같은 값으로 set하면 컴포넌트가 절대 호출되지 않는다"** — 대부분 건너뛰지만, React가 자식을 건너뛰기 전에 그 컴포넌트를 한 번 호출할 수 있다. 렌더 함수를 순수하게 유지하면 문제 되지 않는다.
+- **"모든 컴포넌트를 memo로 감싸야 빠르다"** — props 비교에도 비용이 들고, 새 객체·함수를 넘기는 곳에서는 효과가 없다. 측정해서 실제로 느린 곳에 적용한다.
+- **"렌더링 = 브라우저가 화면을 그리는 것"** — React의 렌더링과 브라우저의 페인트는 다른 단계다.

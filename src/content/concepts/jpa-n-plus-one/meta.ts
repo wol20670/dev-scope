@@ -1,0 +1,65 @@
+import type { ConceptMeta } from '../../../types/concept'
+
+export default {
+  id: 'jpa-n-plus-one',
+  slug: 'jpa-n-plus-one',
+  title: 'JPA N+1 문제',
+  description:
+    '목록을 조회하는 쿼리 1번 뒤에, 각 항목의 연관 엔티티를 가져오는 쿼리가 N번 추가로 실행되는 성능 문제. 지연 로딩과 즉시 로딩 모두에서 생길 수 있다.',
+  category: 'backend',
+  tags: ['JPA', 'Spring', '성능'],
+  aliases: ['N+1 Problem', 'N+1 Select Problem', 'N+1 쿼리', 'N+1 문제', 'Hibernate N+1'],
+  keywords: [
+    '지연 로딩',
+    'Lazy Loading',
+    '즉시 로딩',
+    'Eager Loading',
+    'FetchType.LAZY',
+    'FetchType.EAGER',
+    'fetch join',
+    '페치 조인',
+    '@EntityGraph',
+    '@BatchSize',
+    'default_batch_fetch_size',
+    '배치 페치',
+    'Batch Fetching',
+    'DTO Projection',
+    '페이징',
+    'MultipleBagFetchException',
+    'OSIV',
+  ],
+  difficulty: 'intermediate',
+  prerequisites: ['spring-transaction'],
+  relatedConcepts: ['database-index', 'spring-transaction', 'http-request-lifecycle', 'optimistic-pessimistic-lock'],
+  visualizationType: 'static',
+  keyPoints: [
+    'N+1 문제는 엔티티 N개를 조회한 뒤 각 엔티티의 연관 데이터를 가져오느라 쿼리가 N번 더 실행되는 현상이다.',
+    'LAZY는 쿼리 시점을 접근 시점으로 미룰 뿐이고, EAGER도 JPQL 조회 후 연관을 추가 쿼리로 채우면서 N+1을 일으킬 수 있다.',
+    'fetch join과 @EntityGraph는 필요한 연관을 한 쿼리로 함께 가져와 문제를 해결한다.',
+    '배치 페치(@BatchSize, hibernate.default_batch_fetch_size)는 N번의 쿼리를 IN 조건으로 묶어 대략 1 + N/배치크기 번으로 줄인다.',
+    '컬렉션 fetch join과 페이징을 함께 쓰면 Hibernate가 전체 결과를 메모리에 올려 페이징하므로 피해야 한다.',
+  ],
+  references: [
+    {
+      title: 'Hibernate ORM User Guide — Fetching',
+      url: 'https://docs.hibernate.org/orm/7.0/userguide/html_single/#fetching',
+      publisher: 'Hibernate ORM 7.0 User Guide',
+    },
+    {
+      title: 'Hibernate ORM User Guide — Batch fetching',
+      url: 'https://docs.hibernate.org/orm/7.0/userguide/html_single/#fetching-batch',
+      publisher: 'Hibernate ORM 7.0 User Guide',
+    },
+    {
+      title: 'JPA Query Methods — Configuring Fetch- and LoadGraphs',
+      url: 'https://docs.spring.io/spring-data/jpa/reference/jpa/query-methods.html#jpa.entity-graph',
+      publisher: 'Spring Data JPA Reference',
+    },
+    {
+      title: 'Jakarta Persistence 3.2 Specification (4.4.5.3 Fetch Joins, 3.8 Entity Graphs)',
+      url: 'https://jakarta.ee/specifications/persistence/3.2/jakarta-persistence-spec-3.2.html',
+      publisher: 'Jakarta EE',
+    },
+  ],
+  updatedAt: '2026-11-19',
+} satisfies ConceptMeta
